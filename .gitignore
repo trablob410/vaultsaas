@@ -1,0 +1,50 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+server/tmp/
+server/vendor/
+
+# Node
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+
+# Rust
+mcp-server/target/
+
+# Docker
+docker-compose.override.yml
+
+# Keys (keep .gitkeep)
+keys/*.pem
+
+# Logs
+*.log
+
+# MinIO data
+minio-data/
+
+# PostgreSQL data
+pgdata/
+
+# Caddy data
+caddy-data/
+caddy-config/
+
+# Plans (keep structure, ignore reports)
+plans/*/reports/*.md
+!plans/*/plan.md
+!plans/*/phase-*.md

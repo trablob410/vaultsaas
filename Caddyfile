@@ -1,0 +1,19 @@
+{
+	auto_https off
+}
+
+:8443 {
+	# API backend
+	handle /health {
+		reverse_proxy server:8080
+	}
+
+	handle /api/* {
+		reverse_proxy server:8080
+	}
+
+	# Dashboard
+	handle {
+		reverse_proxy dashboard:3000
+	}
+}
