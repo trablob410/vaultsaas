@@ -123,4 +123,20 @@ impl ValtClient {
         };
         self.get(&path).await
     }
+
+    pub async fn create_secret(&self, name: &str, credential_type: &str, value: &str, source: &str) -> Result<Value> {
+        self.post("/secrets", serde_json::json!({
+            "name": name,
+            "credential_type": credential_type,
+            "value": value,
+            "source": source
+        })).await
+    }
+
+    pub async fn create_scan_result(&self, project_id: &str, scan_path: &str, findings_count: usize) -> Result<Value> {
+        self.post(&format!("/projects/{project_id}/scans"), serde_json::json!({
+            "scan_path": scan_path,
+            "findings_count": findings_count
+        })).await
+    }
 }

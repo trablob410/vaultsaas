@@ -131,3 +131,26 @@ export interface AgentToken {
   revoked_at: string | null
   token?: string  // only present on creation
 }
+
+export interface ScanResult {
+  id: string
+  project_id: string
+  scanned_by: string
+  scan_path: string
+  findings_count: number
+  status: string
+  created_at: string
+}
+
+export interface ScanFinding {
+  id: string
+  scan_id: string
+  file_path: string
+  line_number: number
+  pattern_name: string
+  credential_type: string
+  redacted_preview: string
+  status: string
+  imported_secret_id?: string
+  created_at: string
+}

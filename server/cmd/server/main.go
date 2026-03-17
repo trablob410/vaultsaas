@@ -26,6 +26,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/notify"
 	"github.com/valt-dev/valt/server/internal/org"
 	"github.com/valt-dev/valt/server/internal/project"
+	"github.com/valt-dev/valt/server/internal/scanner"
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/internal/workflow"
 	"github.com/valt-dev/valt/server/internal/workspace"
@@ -102,6 +103,8 @@ func main() {
 	projectHandler := project.NewHandler(projectSvc)
 	agentSvc := agent.NewService(pool)
 	agentHandler := agent.NewHandler(agentSvc)
+	scannerSvc := scanner.NewService(pool)
+	scannerHandler := scanner.NewHandler(scannerSvc)
 
 	// Rate limiters
 	loginLimiter := custommiddleware.NewRateLimiter(5, 1*time.Minute)
@@ -150,6 +153,7 @@ func main() {
 			r.Mount("/orgs/{org_id}/workspaces", workspaceHandler.Routes())
 			r.Mount("/", projectHandler.Routes())
 			r.Mount("/", agentHandler.Routes())
+			r.Mount("/", scannerHandler.Routes())
 		})
 	})
 

@@ -10,6 +10,8 @@ import type {
   ProjectMembership,
   AgentIdentity,
   AgentToken,
+  ScanResult,
+  ScanFinding,
 } from '@/types/api'
 
 const BASE = '/api/proxy'
@@ -113,5 +115,18 @@ export const api = {
       apiFetch<void>(`/agents/${agentId}/tokens/${tokenId}`, { method: 'DELETE' }),
     listTokens: (agentId: string) =>
       apiFetch<{ tokens: AgentToken[] }>(`/agents/${agentId}/tokens`),
+  },
+  scans: {
+    list: (projectId: string) =>
+      apiFetch<{ scans: ScanResult[] }>(`/projects/${projectId}/scans`),
+    getFindings: (scanId: string) =>
+      apiFetch<{ findings: ScanFinding[] }>(`/scans/${scanId}/findings`),
+    importFinding: (scanId: string, findingId: string, secretId: string) =>
+      apiFetch<void>(`/scans/${scanId}/findings/${findingId}/import`, {
+        method: 'POST',
+        body: JSON.stringify({ secret_id: secretId }),
+      }),
+    dismissFinding: (scanId: string, findingId: string) =>
+      apiFetch<void>(`/scans/${scanId}/findings/${findingId}/dismiss`, { method: 'POST' }),
   },
 }

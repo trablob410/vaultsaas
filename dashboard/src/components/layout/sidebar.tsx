@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown } from 'lucide-react'
+import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown, ScanLine } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -10,6 +10,7 @@ const navItems = [
   { href: '/approvals', label: 'Approvals', icon: ClipboardCheck },
   { href: '/audit', label: 'Audit', icon: ScrollText },
   { href: '/agents', label: 'Agents', icon: Bot },
+  { href: '/scans', label: 'Scanner', icon: ScanLine },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
