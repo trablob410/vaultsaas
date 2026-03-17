@@ -4,34 +4,41 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/valt-dev/valt/server/pkg/crypto"
 )
 
 // Service manages dynamic secret providers and leases.
 type Service struct {
-	db *pgxpool.Pool
+	db        *pgxpool.Pool
+	masterKey []byte
 }
 
 // NewService creates a new Service.
-func NewService(db *pgxpool.Pool) *Service {
-	return &Service{db: db}
+func NewService(db *pgxpool.Pool, masterKey []byte) *Service {
+	return &Service{db: db, masterKey: masterKey}
 }
 
 // CreateProvider persists a new provider config.
-// TODO(Phase13): encrypt config with project key before storing.
 func (s *Service) CreateProvider(ctx context.Context, projectID, name, providerType string, config map[string]string, userID string) (*ProviderConfig, error) {
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	enc, err := crypto.EncryptAES256GCM(s.masterKey, raw)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt config: %w", err)
 	}
 	var pc ProviderConfig
 	err = s.db.QueryRow(ctx, `
 		INSERT INTO dynamic_providers (project_id, name, provider_type, config_enc, created_by)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, project_id, name, provider_type, status`,
-		projectID, name, providerType, raw, userID,
+		projectID, name, providerType, enc, userID,
 	).Scan(&pc.ID, &pc.ProjectID, &pc.Name, &pc.ProviderType, &pc.Status)
 	if err != nil {
 		return nil, fmt.Errorf("insert provider: %w", err)
@@ -57,7 +64,16 @@ func (s *Service) ListProviders(ctx context.Context, projectID string) ([]Provid
 		if err := rows.Scan(&pc.ID, &pc.ProjectID, &pc.Name, &pc.ProviderType, &raw, &pc.Status); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(raw, &pc.Config) // best effort
+		decrypted, decErr := crypto.DecryptAES256GCM(s.masterKey, raw)
+		if decErr != nil {
+			// Fallback: try plaintext JSON (pre-migration row)
+			if jsonErr := json.Unmarshal(raw, &pc.Config); jsonErr != nil {
+				log.Printf("Warning: failed to decrypt or parse provider config for ID %s: decrypt=%v json=%v", pc.ID, decErr, jsonErr)
+				// Continue with empty config rather than aborting entire list
+			}
+		} else {
+			_ = json.Unmarshal(decrypted, &pc.Config)
+		}
 		out = append(out, pc)
 	}
 	return out, rows.Err()
@@ -74,7 +90,16 @@ func (s *Service) GetProvider(ctx context.Context, id string) (*ProviderConfig, 
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(raw, &pc.Config)
+	decrypted, decErr := crypto.DecryptAES256GCM(s.masterKey, raw)
+	if decErr != nil {
+		// Fallback: try plaintext JSON (pre-migration row)
+		if jsonErr := json.Unmarshal(raw, &pc.Config); jsonErr != nil {
+			log.Printf("Warning: failed to decrypt or parse provider config for ID %s: decrypt=%v json=%v", pc.ID, decErr, jsonErr)
+			return nil, fmt.Errorf("corrupted provider config")
+		}
+	} else {
+		_ = json.Unmarshal(decrypted, &pc.Config)
+	}
 	return &pc, nil
 }
 
@@ -110,6 +135,10 @@ func (s *Service) CreateLease(ctx context.Context, providerID, agentID, requestI
 	if err != nil {
 		return nil, err
 	}
+	encCreds, err := crypto.EncryptAES256GCM(s.masterKey, credBytes)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt credentials: %w", err)
+	}
 
 	var agentIDPtr, reqIDPtr *string
 	if agentID != "" {
@@ -122,7 +151,7 @@ func (s *Service) CreateLease(ctx context.Context, providerID, agentID, requestI
 	err = s.db.QueryRow(ctx, `
 		INSERT INTO dynamic_leases (provider_id, agent_id, access_request_id, secret_data_enc, ttl_seconds, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		providerID, agentIDPtr, reqIDPtr, credBytes, ttlSeconds, lease.ExpiresAt,
+		providerID, agentIDPtr, reqIDPtr, encCreds, ttlSeconds, lease.ExpiresAt,
 	).Scan(&lease.ID)
 	if err != nil {
 		return nil, fmt.Errorf("insert lease: %w", err)
@@ -144,7 +173,15 @@ func (s *Service) RevokeLease(ctx context.Context, leaseID string) error {
 	}
 
 	var creds map[string]string
-	_ = json.Unmarshal(credRaw, &creds)
+	decCreds, decErr := crypto.DecryptAES256GCM(s.masterKey, credRaw)
+	if decErr != nil {
+		if jsonErr := json.Unmarshal(credRaw, &creds); jsonErr != nil {
+			log.Printf("Warning: failed to decrypt or parse lease credentials for lease %s: %v", leaseID, jsonErr)
+			return fmt.Errorf("corrupted lease credentials")
+		}
+	} else {
+		_ = json.Unmarshal(decCreds, &creds)
+	}
 
 	_, err = s.db.Exec(ctx, `UPDATE dynamic_leases SET revoked_at = now() WHERE id = $1`, leaseID)
 	if err != nil {
@@ -185,6 +222,13 @@ func (s *Service) ListActiveLeases(ctx context.Context, providerID string) ([]Le
 		out = append(out, li)
 	}
 	return out, rows.Err()
+}
+
+// GetLeaseProviderID returns the provider_id for a given lease.
+func (s *Service) GetLeaseProviderID(ctx context.Context, leaseID string) (string, error) {
+	var providerID string
+	err := s.db.QueryRow(ctx, `SELECT provider_id FROM dynamic_leases WHERE id = $1`, leaseID).Scan(&providerID)
+	return providerID, err
 }
 
 // StartExpiryWorker runs a background goroutine that marks expired leases every 60s.

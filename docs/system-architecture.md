@@ -137,9 +137,10 @@ Go linting via `.golangci.yml` (govet shadow, errcheck, staticcheck, unused).
 | `internal/notify/email.go` | SMTP email delivery; no-op when SMTP not configured |
 | `internal/consent/service.go` | Consent record creation and lookup |
 | `internal/consent/handler.go` | `POST /api/v1/consent` handler |
-| `internal/workflow/service.go` | Approval state machine: pending → approved/rejected → active → expired/revoked |
+| `internal/workflow/service.go` | Approval state machine: pending → approved/rejected → active → expired/revoked; `IsAssignedApprover` check |
 | `internal/workflow/credential.go` | Temporary credential lifecycle (issue, expire, revoke) |
-| `internal/workflow/handler.go` | 6 workflow endpoints |
+| `internal/workflow/handler.go` | 6 workflow endpoints; approver/owner access enforcement on GetRequest, Approve, Reject, IssueCredential; surfaces IssueCredential errors |
+| `internal/workflow/approval-chain.go` | Multi-step approval chain; `RejectionReason *string` field on `ApprovalStep`; persists rejection reason via `AdvanceChain` in a serializable transaction |
 
 ## Workflow State Machine (Phase 1.4)
 
@@ -285,8 +286,43 @@ MCP Server (Rust)
 - `authenticate_agent` MCP tool accepts a token, stores it in the OS keychain, and clears `VALT_AGENT_TOKEN` env usage.
 
 ## Security Architecture
-- Envelope encryption: server-side AES-256-GCM. Random DEK encrypts each secret value. Master KEK (VAULT_MASTER_KEY env var) wraps DEK. Pattern: AWS Secrets Manager / HashiCorp Vault.
-- JWT RS256 (15min access, 7day refresh)
-- Sliding-window rate limiting on all routes
-- Security headers enforced via middleware
-- Audit hash chain (SHA-256)
+
+### Encryption at Rest
+- **Secret values**: Envelope encryption — random DEK (AES-256-GCM) per secret, DEK wrapped by master KEK (`VAULT_MASTER_KEY` env var). Pattern mirrors AWS Secrets Manager / HashiCorp Vault.
+- **Provider configs** (`dynamic_providers.config_enc`): AES-256-GCM, keyed by `masterKey []byte` injected into `dynsecret.Service` at startup. Plaintext JSON fallback on decrypt failure for pre-migration rows.
+- **Lease credentials** (`dynamic_leases.secret_data_enc`): AES-256-GCM, same `masterKey`. Decrypted on read in `RevokeLease`; plaintext fallback for legacy rows.
+- **wiring**: `cmd/server/main.go` passes master key to `dynsecret.NewService(db, masterKey)`.
+
+### Authentication
+- JWT RS256 (15min access / 7day refresh)
+- Agent tokens: SHA-256 hash stored in `agent_tokens`; `X-Agent-ID` header identifies agent for rate limiting
+
+### RBAC
+`rbac.Middleware(db, projectParam, resource, action)` resolves the caller's project role from `project_memberships` and calls `rbac.Can(role, resource, action)`. Returns 400 if `project_id` URL param is absent; 403 if not a member or insufficient role.
+
+| Resource constant | Applied to |
+|---|---|
+| `ResourceSecret` | vault routes |
+| `ResourceProject` | project routes |
+| `ResourceAgent` | agent routes |
+| `ResourceScans` | scanner project routes |
+| `ResourceDynSecret` | dynsecret project routes |
+
+Role permission matrix (owner/admin have identical rights):
+
+| Resource | owner/admin | member | viewer |
+|---|---|---|---|
+| secret | read, write, admin, approve | read, write | read |
+| project | read, write, admin | read | read |
+| agent | read, write, admin | read, write | read |
+| scans | read, write | read, write | read |
+| dynsecret | read, write | read | read |
+
+### Rate Limiting
+`ratelimit.RedisLimiter.Middleware(rpm)` gates on `X-Agent-ID` request header. Requests without the header (human dashboard users) pass through unconditionally. On Redis error the middleware is fail-open (allows the request). Returns HTTP 429 with `{"error":"rate limit exceeded"}` when the sliding window is exceeded.
+
+### Other Controls
+- Sliding-window rate limiting on all routes (general middleware layer)
+- Security headers enforced via `internal/middleware/`
+- Audit hash chain (SHA-256) — each record links to predecessor
+- Path traversal prevention in `mcp-server/scanner_tools.rs`: rejects absolute paths (`/`, `\`, drive letters), `..` sequences, and paths longer than 500 characters

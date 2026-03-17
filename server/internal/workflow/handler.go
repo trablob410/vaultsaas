@@ -161,6 +161,22 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify caller is an assigned approver or secret owner before approving.
+	req0, err := h.service.GetRequestByID(r.Context(), requestID)
+	if err != nil || req0 == nil {
+		apierror.NotFound(w, "request not found")
+		return
+	}
+	isApprover, _ := h.service.IsAssignedApprover(r.Context(), requestID, userID)
+	if !isApprover {
+		secret, _ := h.vaultSvc.GetSecretByID(r.Context(), req0.SecretID)
+		isOwner := secret != nil && secret.UserID == userID
+		if !isOwner {
+			apierror.Forbidden(w, "not authorized to approve this request")
+			return
+		}
+	}
+
 	req, err := h.service.Approve(r.Context(), requestID, userID)
 	if err != nil {
 		apierror.BadRequest(w, err.Error())
@@ -184,6 +200,8 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	_, issueErr := h.credMgr.IssueCredential(r.Context(), req.ID, credType, req.RequestedDurationMinutes)
 	if issueErr != nil {
 		log.Printf("Failed to issue credential after approval: %v", issueErr)
+		apierror.InternalError(w, "approved but failed to issue credential")
+		return
 	}
 
 	h.auditLog.LogFromRequest(r, userID, "access_request.approve", "access_request", requestID)
@@ -212,10 +230,18 @@ func (h *Handler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		apierror.NotFound(w, "request not found")
 		return
 	}
-	// Only the requester or the secret owner can view the request
+	// Only the requester, an assigned approver, or the secret owner can view the request
 	if req.RequesterUserID != userID {
-		apierror.Forbidden(w, "not your request")
-		return
+		isApprover, _ := h.service.IsAssignedApprover(r.Context(), requestID, userID)
+		isOwner := false
+		if !isApprover {
+			secret, _ := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
+			isOwner = secret != nil && secret.UserID == userID
+		}
+		if !isApprover && !isOwner {
+			apierror.Forbidden(w, "not your request")
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -230,6 +256,22 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 	if _, err := validator.ValidateUUID(requestID); err != nil {
 		apierror.BadRequest(w, "invalid request_id")
 		return
+	}
+
+	// Verify caller is an assigned approver or secret owner before rejecting.
+	req0, err := h.service.GetRequestByID(r.Context(), requestID)
+	if err != nil || req0 == nil {
+		apierror.NotFound(w, "request not found")
+		return
+	}
+	isApprover, _ := h.service.IsAssignedApprover(r.Context(), requestID, userID)
+	if !isApprover {
+		secret, _ := h.vaultSvc.GetSecretByID(r.Context(), req0.SecretID)
+		isOwner := secret != nil && secret.UserID == userID
+		if !isOwner {
+			apierror.Forbidden(w, "not authorized to reject this request")
+			return
+		}
 	}
 
 	var body approveRejectBody

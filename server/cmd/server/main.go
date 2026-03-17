@@ -113,10 +113,10 @@ func main() {
 	agentSvc := agent.NewService(pool)
 	agentHandler := agent.NewHandler(agentSvc)
 	scannerSvc := scanner.NewService(pool)
-	scannerHandler := scanner.NewHandler(scannerSvc)
-	dynSvc := dynsecret.NewService(pool)
+	scannerHandler := scanner.NewHandler(scannerSvc, pool)
+	dynSvc := dynsecret.NewService(pool, masterKey)
 	dynSvc.StartExpiryWorker(ctx)
-	dynHandler := dynsecret.NewHandler(dynSvc)
+	dynHandler := dynsecret.NewHandler(dynSvc, pool)
 
 	// Redis rate limiter (optional — skip if REDIS_URL not set)
 	var agentRateLimiter *ratelimit.RedisLimiter
@@ -129,7 +129,7 @@ func main() {
 			defer agentRateLimiter.Close()
 		}
 	}
-	_ = agentRateLimiter // available for use in handlers
+	// agentRateLimiter is wired into the authenticated route group below
 
 	// Usage tracking
 	usageTracker := usage.NewTracker(pool)
@@ -168,6 +168,9 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware(jwtMgr))
 			r.Use(apiLimiter.Middleware())
+			if agentRateLimiter != nil {
+				r.Use(agentRateLimiter.Middleware(60))
+			}
 
 			r.Mount("/secrets", vaultHandler.Routes())
 			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)

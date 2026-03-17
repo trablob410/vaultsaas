@@ -220,6 +220,18 @@ func (s *Service) Reject(ctx context.Context, requestID, approverUserID, rejecti
 	return &req, nil
 }
 
+// IsAssignedApprover returns true if userID has an entry in approval_steps for the given requestID.
+func (s *Service) IsAssignedApprover(ctx context.Context, requestID, userID string) (bool, error) {
+	var cnt int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM approval_steps WHERE request_id = $1 AND approver_user_id = $2`,
+		requestID, userID).Scan(&cnt)
+	if err != nil {
+		return false, err
+	}
+	return cnt > 0, nil
+}
+
 // GetRequestByID fetches a single access request.
 func (s *Service) GetRequestByID(ctx context.Context, requestID string) (*AccessRequest, error) {
 	var req AccessRequest

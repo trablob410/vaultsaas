@@ -54,20 +54,30 @@ func (t *Tracker) CheckLimit(ctx context.Context, orgID, metric string) (bool, i
 }
 
 // GetCurrent returns the current count for a metric.
-// secrets_count / agents_count: actual table counts (TODO: scope to org properly).
+// secrets_count / agents_count: counts scoped to the org via project/workspace chain.
 // requests_today: sum from usage_metrics for today.
 func (t *Tracker) GetCurrent(ctx context.Context, orgID, metric string) (int, error) {
 	switch metric {
 	case "secrets_count":
-		// TODO: scope to org via project membership once secrets have org FK
 		var count int
-		err := t.db.QueryRow(ctx, `SELECT COUNT(*) FROM secrets`).Scan(&count)
+		err := t.db.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM secrets s
+			JOIN projects p ON p.id = s.project_id
+			JOIN workspaces w ON w.id = p.workspace_id
+			WHERE w.org_id = $1
+		`, orgID).Scan(&count)
 		return count, err
 
 	case "agents_count":
-		// TODO: scope to org via projects once agent_identities have org FK
 		var count int
-		err := t.db.QueryRow(ctx, `SELECT COUNT(*) FROM agent_identities`).Scan(&count)
+		err := t.db.QueryRow(ctx, `
+			SELECT COUNT(*)
+			FROM agent_identities a
+			JOIN projects p ON p.id = a.project_id
+			JOIN workspaces w ON w.id = p.workspace_id
+			WHERE w.org_id = $1
+		`, orgID).Scan(&count)
 		return count, err
 
 	case "requests_today":

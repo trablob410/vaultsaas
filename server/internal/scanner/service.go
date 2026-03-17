@@ -133,6 +133,8 @@ func (s *Service) ListFindings(ctx context.Context, scanID string) ([]ScanFindin
 }
 
 // ImportFinding marks a finding as imported and records the secret ID.
+// Authorization: caller must verify project membership before calling this method.
+// The handler enforces this via checkScanAccess.
 func (s *Service) ImportFinding(ctx context.Context, findingID, secretID string) error {
 	ct, err := s.db.Exec(ctx,
 		`UPDATE scan_findings SET status = 'imported', imported_secret_id = $1 WHERE id = $2`,
@@ -147,7 +149,16 @@ func (s *Service) ImportFinding(ctx context.Context, findingID, secretID string)
 	return nil
 }
 
+// GetScanProjectID returns the project_id for a given scan.
+func (s *Service) GetScanProjectID(ctx context.Context, scanID string) (string, error) {
+	var projectID string
+	err := s.db.QueryRow(ctx, `SELECT project_id FROM scan_results WHERE id = $1`, scanID).Scan(&projectID)
+	return projectID, err
+}
+
 // DismissFinding marks a finding as dismissed.
+// Authorization: caller must verify project membership before calling this method.
+// The handler enforces this via checkScanAccess.
 func (s *Service) DismissFinding(ctx context.Context, findingID string) error {
 	ct, err := s.db.Exec(ctx,
 		`UPDATE scan_findings SET status = 'dismissed' WHERE id = $1`,

@@ -1,5 +1,67 @@
 # Project Changelog
 
+## [1.4.0] - 2026-03-17 — Phase 16: Security Hardening
+
+### Added
+
+**Encryption at Rest — Dynamic Secrets (Phase 16.1)**
+- `dynsecret.Service` now holds `masterKey []byte`; `NewService(db, masterKey)` updated
+- `CreateProvider`: AES-256-GCM encrypts provider config before INSERT
+- `CreateLease`: AES-256-GCM encrypts lease credentials before INSERT
+- `ListProviders`, `GetProvider`, `RevokeLease`: decrypt with plaintext fallback for pre-migration rows
+- `VAULT_MASTER_KEY` env var documented in `.env.example` and `docker-compose.yml`
+
+**Scanner RBAC (Phase 16.2)**
+- `ResourceScans Resource = "scans"` added to `rbac/rbac.go` with full role permission matrix
+- `rbac.Middleware` applied to project-scoped scanner routes
+- `checkScanAccess` helper for scan-scoped routes
+- `GetScanProjectID` added to scanner service
+- `listFindings`, `importFinding`, `dismissFinding` replaced `_ = auth.UserIDFromContext(...)` stubs with real RBAC checks
+- `scanner.NewHandler` now accepts `db *pgxpool.Pool`
+
+**DynSecret RBAC (Phase 16.3)**
+- `ResourceDynSecret Resource = "dynsecret"` added to `rbac/rbac.go`
+- `rbac.Middleware` applied to project-scoped dynsecret routes
+- `checkProviderAccess` helper for provider-scoped routes
+- `GetLeaseProviderID` added to dynsecret service
+- Auth checks applied to `createLease`, `listLeases`, `revokeLease`
+- `dynsecret.NewHandler` now accepts `db *pgxpool.Pool`
+
+**Org-Scoped Usage Counts (Phase 16.4)**
+- Fixed global `SELECT COUNT(*) FROM secrets` → 3-table JOIN: `secrets → projects → workspaces WHERE w.org_id = $1`
+- Fixed `agents_count` same way via `agent_identities → projects → workspaces`
+- Removed stale TODO comments from `tracker.go`
+
+**High-Priority Security Fixes (Phase 16.5)**
+- H1: `GetRequest`, `Approve`, `Reject` now authorize assigned approvers and secret owners, not requester only
+- H2: `ratelimit/middleware.go` — `Middleware(rpm)` applied to auth route group (60rpm per agent via X-Agent-ID); Redis ZADD member includes `rand.Int63()` to prevent millisecond-collision deduplication
+- H3: `Approve` handler returns HTTP 500 if `IssueCredential` fails (was silently swallowed)
+- H4: MCP `scanner_tools.rs` rejects absolute paths, Windows drive letters (`C:`), `..` sequences, paths > 500 chars
+- H5: Migration `000024` adds `rejection_reason TEXT` to `approval_steps`; `AdvanceChain` persists rejection reason; `ApprovalStep` struct updated with `RejectionReason *string`
+
+**RBAC Middleware Hardening**
+- `rbac/middleware.go` returns HTTP 400 on missing `project_id` (was silent pass-through)
+
+### Security Impact
+| Finding | Severity | Status |
+|---------|----------|--------|
+| DynSecret provider/lease config stored plaintext | CRITICAL | Fixed |
+| Scanner routes unauthenticated | CRITICAL | Fixed |
+| DynSecret routes unauthenticated | CRITICAL | Fixed |
+| Usage counts not org-scoped (data leak) | CRITICAL | Fixed |
+| Approval access limited to requester only | HIGH | Fixed |
+| Rate limiter Redis ZADD dedup collision | HIGH | Fixed |
+| IssueCredential failure silently swallowed | HIGH | Fixed |
+| MCP path traversal / absolute path injection | HIGH | Fixed |
+| Rejection reason not persisted | MEDIUM | Fixed |
+| RBAC middleware silent on missing project_id | MEDIUM | Fixed |
+
+### Known Follow-ups (Non-blocking)
+- `ListProviders`: silently continues with empty config when both decrypt paths fail (minor UX)
+- `ListPending`: non-owner approvers cannot see approvals assigned to them
+
+---
+
 ## [1.3.0] - 2026-03-17 — Phases 10-15: Scanner, Dynamic Secrets, Gateway, RBAC, CLI, Free Tier
 
 ### Added

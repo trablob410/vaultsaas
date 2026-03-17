@@ -1,31 +1,37 @@
 package scanner
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/valt-dev/valt/server/internal/auth"
+	"github.com/valt-dev/valt/server/internal/rbac"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 )
 
 // Handler handles HTTP routes for the scanner package.
 type Handler struct {
 	service *Service
+	db      *pgxpool.Pool
 }
 
 // NewHandler creates a new scanner Handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, db *pgxpool.Pool) *Handler {
+	return &Handler{service: service, db: db}
 }
 
 // Routes registers all scanner routes.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Post("/projects/{project_id}/scans", h.createScan)
-	r.Get("/projects/{project_id}/scans", h.listScans)
+	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceScans, rbac.ActionWrite)).
+		Post("/projects/{project_id}/scans", h.createScan)
+	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceScans, rbac.ActionRead)).
+		Get("/projects/{project_id}/scans", h.listScans)
 	r.Get("/scans/{scan_id}/findings", h.listFindings)
 	r.Post("/scans/{scan_id}/findings/{finding_id}/import", h.importFinding)
 	r.Post("/scans/{scan_id}/findings/{finding_id}/dismiss", h.dismissFinding)
@@ -66,7 +72,6 @@ func (h *Handler) createScan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listScans(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
-	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
 
 	scans, err := h.service.ListScans(r.Context(), projectID)
 	if err != nil {
@@ -84,7 +89,10 @@ func (h *Handler) listScans(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listFindings(w http.ResponseWriter, r *http.Request) {
 	scanID := chi.URLParam(r, "scan_id")
-	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
+	userID := auth.UserIDFromContext(r.Context())
+	if !h.checkScanAccess(r.Context(), w, scanID, userID, rbac.ActionRead) {
+		return
+	}
 
 	findings, err := h.service.ListFindings(r.Context(), scanID)
 	if err != nil {
@@ -105,8 +113,12 @@ type importFindingRequest struct {
 }
 
 func (h *Handler) importFinding(w http.ResponseWriter, r *http.Request) {
+	scanID := chi.URLParam(r, "scan_id")
 	findingID := chi.URLParam(r, "finding_id")
-	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
+	userID := auth.UserIDFromContext(r.Context())
+	if !h.checkScanAccess(r.Context(), w, scanID, userID, rbac.ActionWrite) {
+		return
+	}
 
 	var req importFindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -129,8 +141,12 @@ func (h *Handler) importFinding(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) dismissFinding(w http.ResponseWriter, r *http.Request) {
+	scanID := chi.URLParam(r, "scan_id")
 	findingID := chi.URLParam(r, "finding_id")
-	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
+	userID := auth.UserIDFromContext(r.Context())
+	if !h.checkScanAccess(r.Context(), w, scanID, userID, rbac.ActionWrite) {
+		return
+	}
 
 	if err := h.service.DismissFinding(r.Context(), findingID); err != nil {
 		log.Printf("Failed to dismiss finding: %v", err)
@@ -140,4 +156,24 @@ func (h *Handler) dismissFinding(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "dismissed"}) //nolint:errcheck
+}
+
+// checkScanAccess verifies the user has the required permission on the scan's project.
+func (h *Handler) checkScanAccess(ctx context.Context, w http.ResponseWriter, scanID, userID string, action rbac.Action) bool {
+	projectID, err := h.service.GetScanProjectID(ctx, scanID)
+	if err != nil {
+		apierror.NotFound(w, "scan not found")
+		return false
+	}
+	var role string
+	err = h.db.QueryRow(ctx, `SELECT role FROM project_memberships WHERE project_id = $1 AND user_id = $2`, projectID, userID).Scan(&role)
+	if err != nil {
+		apierror.Forbidden(w, "access denied")
+		return false
+	}
+	if !rbac.Can(rbac.RoleFromProjectMembership(role), rbac.ResourceScans, action) {
+		apierror.Forbidden(w, "insufficient permissions")
+		return false
+	}
+	return true
 }

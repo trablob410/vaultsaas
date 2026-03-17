@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -34,9 +35,11 @@ func (l *RedisLimiter) Allow(ctx context.Context, agentID string, rpm int) (bool
 	now := time.Now().UnixMilli()
 	windowStart := now - 60_000 // 60 seconds ago in ms
 
+	// Use timestamp:random member to prevent millisecond deduplication collisions.
+	member := fmt.Sprintf("%d-%d", now, rand.Int63())
 	pipe := l.client.Pipeline()
 	pipe.ZRemRangeByScore(ctx, key, "-inf", fmt.Sprintf("%d", windowStart))
-	pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: now})
+	pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: member})
 	pipe.ZCard(ctx, key)
 	pipe.Expire(ctx, key, 65*time.Second)
 

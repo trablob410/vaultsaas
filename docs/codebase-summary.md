@@ -18,16 +18,16 @@ vaultsaas/
 │   │   ├── audit/           # Structured logger, SHA-256 hash chain, GET /audit/logs (Phase 1.4)
 │   │   ├── notify/          # SMTP email notifications, no-op fallback (Phase 1.4)
 │   │   ├── consent/         # User consent recording, POST /consent (Phase 1.4)
-│   │   ├── workflow/        # Approval state machine, multi-step approval chains, policy enforcement (Phase 1.4/13)
+│   │   ├── workflow/        # Approval state machine, multi-step approval chains, policy enforcement; IsAssignedApprover; rejection_reason persistence; approver/owner access checks on GetRequest/Approve/Reject/IssueCredential (Phase 1.4/13/hardening)
 │   │   ├── config/          # GoogleClientID/Secret/RedirectURL, DashboardURL (Phase 1.5)
 │   │   ├── org/             # Organization CRUD, membership management (Phase 8)
 │   │   ├── workspace/       # Workspace CRUD under org (Phase 8)
 │   │   ├── project/         # Project CRUD under workspace (Phase 8)
 │   │   ├── agent/           # Agent identity, token issuance (SHA-256), AgentAuthMiddleware (Phase 9)
-│   │   ├── scanner/         # Scan result + finding CRUD, 5 HTTP endpoints (Phase 10)
-│   │   ├── dynsecret/       # Provider interface, PostgresProvider, lease management, auto-expiry worker (Phase 11)
-│   │   ├── rbac/            # Role permission matrix (owner/admin/member/viewer), RBAC middleware (Phase 13)
-│   │   ├── ratelimit/       # Redis sliding-window per-agent rate limiting, go-redis/v9 (Phase 13)
+│   │   ├── scanner/         # Scan result + finding CRUD, 5 HTTP endpoints, GetScanProjectID, checkScanAccess, rbac.Middleware on project routes (Phase 10/hardening)
+│   │   ├── dynsecret/       # Provider interface, PostgresProvider, lease management, AES-256-GCM config+credential encryption, GetLeaseProviderID, auto-expiry worker (Phase 11/hardening)
+│   │   ├── rbac/            # Role permission matrix (owner/admin/member/viewer), ResourceScans+ResourceDynSecret constants, RBAC middleware; 400 on missing project_id (Phase 13/hardening)
+│   │   ├── ratelimit/       # Redis sliding-window per-agent rate limiting (go-redis/v9); Middleware(rpm) gates on X-Agent-ID header; fail-open on Redis errors (Phase 13/hardening)
 │   │   └── usage/           # Usage tracking, free tier enforcement middleware, GET /orgs/{id}/usage (Phase 15)
 │   ├── pkg/
 │   │   ├── apierror/        # Standard API error JSON (Phase 1.3)
@@ -90,6 +90,7 @@ vaultsaas/
 │   │   ├── tools.rs         # 8 MCP tools (Phase 10 added scan_secrets, store_secret; Phase 11 added request_dynamic_secret)
 │   │   ├── resources.rs     # 3 MCP resources
 │   │   ├── scanner.rs       # 17 regex patterns for secret scanning (AWS, GitHub, Stripe, OpenAI, etc.) (Phase 10)
+│   │   ├── scanner_tools.rs # scan_secrets + store_secret implementations; path traversal prevention: rejects absolute paths, drive letters, "..", paths > 500 chars (Phase 10/hardening)
 │   │   └── http.rs          # axum HTTP server: POST /mcp, GET /mcp/sse (SSE), Bearer auth (Phase 12)
 │   ├── Cargo.toml
 │   └── Dockerfile
@@ -147,7 +148,7 @@ vaultsaas/
 | 14 CLI + SDKs | DONE — 2026-03-17 |
 | 15 Cloud Free Tier | DONE — 2026-03-17 |
 
-- **server**: All Phase 1.3-1.5 backend live; Google OAuth2, org/workspace/project hierarchy, agent identity, secret scanner, dynamic secrets, RBAC, rate limiting, usage/free tier; migrations 000001-000023; 74+ Go unit tests passing
+- **server**: All Phase 1.3-1.5 backend live; Google OAuth2, org/workspace/project hierarchy, agent identity, secret scanner, dynamic secrets, RBAC, rate limiting, usage/free tier; security hardening (AES-256-GCM on provider configs + lease credentials, RBAC on scanner/dynsecret project routes, rate limiter gated on X-Agent-ID, rejection_reason on approval_steps, org-scoped usage COUNT, approver/owner access checks on workflow); migrations 000001-000024; 74+ Go unit tests passing
 - **dashboard**: Full Next.js App Router — sign-in, secrets CRUD, approvals, audit, orgs, projects, agents, scans, providers, settings/upgrade; BFF proxy; 19 vitest tests passing
 - **mcp-server**: 8 MCP tools, 3 resources; stdio + HTTP/SSE dual transport (axum); Bearer auth; 17 regex scanner patterns; OS keychain auth; 11+ unit tests passing
 - **sdk**: Go SDK (`github.com/valt-dev/valt-go`, stdlib only) and Python SDK (urllib only)

@@ -23,7 +23,7 @@ func Middleware(db *pgxpool.Pool, projectParam string, resource Resource, action
 
 			projectID := chi.URLParam(r, projectParam)
 			if projectID == "" {
-				next.ServeHTTP(w, r)
+				apierror.BadRequest(w, "project_id is required")
 				return
 			}
 

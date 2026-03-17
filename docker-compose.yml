@@ -50,6 +50,7 @@ services:
       CORS_ORIGINS: http://localhost:3000,http://localhost:8443
       JWT_PRIVATE_KEY_PATH: /app/keys/private.pem
       JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-http://localhost:8080/api/v1/auth/google/callback}

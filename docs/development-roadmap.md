@@ -53,6 +53,20 @@
 - [x] Makefile targets: `test-unit`, `test-integration`, `test-dashboard`, `test-mcp`, `security`
 - [x] `.golangci.yml`: govet shadow, errcheck, staticcheck, unused enabled
 
+### Phase 1.8: Security Hardening [DONE - 2026-03-17]
+- [x] AES-256-GCM encryption for dynamic provider configs and lease credentials at rest
+- [x] RBAC authorization on all scanner routes (createScan, listScans, listFindings, importFinding, dismissFinding)
+- [x] RBAC authorization on all dynsecret routes (createProvider, listProviders, createLease, listLeases, revokeLease)
+- [x] `ResourceScans` + `ResourceDynSecret` added to RBAC permission matrix
+- [x] Org-scoped usage counts (secrets, agents) — fixed global COUNT replaced with 3-table JOIN scoped to org_id
+- [x] Approval access: `GetRequest`, `Approve`, `Reject` allow assigned approvers + secret owners (not requester-only)
+- [x] Auth rate limiting middleware (`ratelimit/middleware.go`, 60rpm per agent via X-Agent-ID, Redis ZADD dedup fixed)
+- [x] `Approve` handler propagates `IssueCredential` failure as HTTP 500
+- [x] MCP scanner path validation: rejects absolute paths, Windows drive letters, `..` sequences, paths > 500 chars
+- [x] Migration `000024`: `rejection_reason TEXT` on `approval_steps`; `AdvanceChain` persists rejection reason
+- [x] RBAC middleware returns HTTP 400 on missing project_id (was silent pass-through)
+- [x] `VAULT_MASTER_KEY` documented in `.env.example` and `docker-compose.yml`
+
 ### Phase 8: Organization Hierarchy [DONE - 2026-03-17]
 - [x] DB migrations 013-015: organizations, workspaces, projects, memberships, secrets.project_id
 - [x] Go packages: `internal/org/`, `internal/workspace/`, `internal/project/`

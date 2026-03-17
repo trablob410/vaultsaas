@@ -7,6 +7,28 @@ use crate::tools;
 pub async fn tool_scan_secrets(args: &Value, client: &ValtClient) -> Result<Value> {
     let path = args["path"].as_str()
         .ok_or_else(|| crate::error::ValtError::Protocol("path required".into()))?;
+    // Validate path safety — reject absolute paths and traversal sequences
+    if path.starts_with('/') || path.starts_with('\\') {
+        return Err(crate::error::ValtError::Protocol(
+            "path must be relative (absolute paths not allowed)".into()
+        ));
+    }
+    // Reject Windows drive letters (e.g. C:)
+    if path.len() >= 2 && path.as_bytes()[1] == b':' {
+        return Err(crate::error::ValtError::Protocol(
+            "path must be relative (drive paths not allowed)".into()
+        ));
+    }
+    // Reject path traversal
+    if path.contains("..") {
+        return Err(crate::error::ValtError::Protocol(
+            "path cannot contain '..'".into()
+        ));
+    }
+    // Reject excessively long paths
+    if path.len() > 500 {
+        return Err(crate::error::ValtError::Protocol("path too long".into()));
+    }
     let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(true);
     let findings = scanner::scan_directory(path, recursive);
     let count = findings.len();

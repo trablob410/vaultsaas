@@ -4,9 +4,11 @@ type Resource string
 type Action string
 
 const (
-	ResourceSecret  Resource = "secret"
-	ResourceProject Resource = "project"
-	ResourceAgent   Resource = "agent"
+	ResourceSecret    Resource = "secret"
+	ResourceProject   Resource = "project"
+	ResourceAgent     Resource = "agent"
+	ResourceScans     Resource = "scans"
+	ResourceDynSecret Resource = "dynsecret"
 )
 
 const (
@@ -19,24 +21,32 @@ const (
 // rolePerms defines what each role can do
 var rolePerms = map[string]map[Resource][]Action{
 	"owner": {
-		ResourceSecret:  {ActionRead, ActionWrite, ActionAdmin, ActionApprove},
-		ResourceProject: {ActionRead, ActionWrite, ActionAdmin},
-		ResourceAgent:   {ActionRead, ActionWrite, ActionAdmin},
+		ResourceSecret:    {ActionRead, ActionWrite, ActionAdmin, ActionApprove},
+		ResourceProject:   {ActionRead, ActionWrite, ActionAdmin},
+		ResourceAgent:     {ActionRead, ActionWrite, ActionAdmin},
+		ResourceScans:     {ActionRead, ActionWrite},
+		ResourceDynSecret: {ActionRead, ActionWrite},
 	},
 	"admin": {
-		ResourceSecret:  {ActionRead, ActionWrite, ActionAdmin, ActionApprove},
-		ResourceProject: {ActionRead, ActionWrite, ActionAdmin},
-		ResourceAgent:   {ActionRead, ActionWrite, ActionAdmin},
+		ResourceSecret:    {ActionRead, ActionWrite, ActionAdmin, ActionApprove},
+		ResourceProject:   {ActionRead, ActionWrite, ActionAdmin},
+		ResourceAgent:     {ActionRead, ActionWrite, ActionAdmin},
+		ResourceScans:     {ActionRead, ActionWrite},
+		ResourceDynSecret: {ActionRead, ActionWrite},
 	},
 	"member": {
-		ResourceSecret:  {ActionRead, ActionWrite},
-		ResourceProject: {ActionRead},
-		ResourceAgent:   {ActionRead, ActionWrite},
+		ResourceSecret:    {ActionRead, ActionWrite},
+		ResourceProject:   {ActionRead},
+		ResourceAgent:     {ActionRead, ActionWrite},
+		ResourceScans:     {ActionRead, ActionWrite},
+		ResourceDynSecret: {ActionRead},
 	},
 	"viewer": {
-		ResourceSecret:  {ActionRead},
-		ResourceProject: {ActionRead},
-		ResourceAgent:   {ActionRead},
+		ResourceSecret:    {ActionRead},
+		ResourceProject:   {ActionRead},
+		ResourceAgent:     {ActionRead},
+		ResourceScans:     {ActionRead},
+		ResourceDynSecret: {ActionRead},
 	},
 }
 

@@ -1,32 +1,38 @@
 package dynsecret
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/valt-dev/valt/server/internal/auth"
+	"github.com/valt-dev/valt/server/internal/rbac"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 )
 
 // Handler exposes dynamic secret provider and lease HTTP endpoints.
 type Handler struct {
 	service *Service
+	db      *pgxpool.Pool
 }
 
 // NewHandler creates a new Handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, db *pgxpool.Pool) *Handler {
+	return &Handler{service: service, db: db}
 }
 
 // Routes returns a chi.Router with all dynamic secret routes.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Post("/projects/{project_id}/providers", h.createProvider)
-	r.Get("/projects/{project_id}/providers", h.listProviders)
+	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceDynSecret, rbac.ActionWrite)).
+		Post("/projects/{project_id}/providers", h.createProvider)
+	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceDynSecret, rbac.ActionRead)).
+		Get("/projects/{project_id}/providers", h.listProviders)
 	r.Post("/providers/{provider_id}/leases", h.createLease)
 	r.Get("/providers/{provider_id}/leases", h.listLeases)
 	r.Delete("/leases/{lease_id}", h.revokeLease)
@@ -103,6 +109,10 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createLease(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "provider_id")
+	userID := auth.UserIDFromContext(r.Context())
+	if !h.checkProviderAccess(r.Context(), w, providerID, userID, rbac.ActionWrite) {
+		return
+	}
 
 	var req createLeaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -134,6 +144,10 @@ func (h *Handler) createLease(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listLeases(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "provider_id")
+	userID := auth.UserIDFromContext(r.Context())
+	if !h.checkProviderAccess(r.Context(), w, providerID, userID, rbac.ActionRead) {
+		return
+	}
 
 	leases, err := h.service.ListActiveLeases(r.Context(), providerID)
 	if err != nil {
@@ -148,6 +162,15 @@ func (h *Handler) listLeases(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) revokeLease(w http.ResponseWriter, r *http.Request) {
 	leaseID := chi.URLParam(r, "lease_id")
+	userID := auth.UserIDFromContext(r.Context())
+	providerID, err := h.service.GetLeaseProviderID(r.Context(), leaseID)
+	if err != nil {
+		apierror.NotFound(w, "lease not found")
+		return
+	}
+	if !h.checkProviderAccess(r.Context(), w, providerID, userID, rbac.ActionWrite) {
+		return
+	}
 
 	if err := h.service.RevokeLease(r.Context(), leaseID); err != nil {
 		log.Printf("Failed to revoke lease: %v", err)
@@ -156,4 +179,24 @@ func (h *Handler) revokeLease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkProviderAccess verifies the user has the required permission on the provider's project.
+func (h *Handler) checkProviderAccess(ctx context.Context, w http.ResponseWriter, providerID, userID string, action rbac.Action) bool {
+	pc, err := h.service.GetProvider(ctx, providerID)
+	if err != nil {
+		apierror.NotFound(w, "provider not found")
+		return false
+	}
+	var role string
+	err = h.db.QueryRow(ctx, `SELECT role FROM project_memberships WHERE project_id = $1 AND user_id = $2`, pc.ProjectID, userID).Scan(&role)
+	if err != nil {
+		apierror.Forbidden(w, "access denied")
+		return false
+	}
+	if !rbac.Can(rbac.RoleFromProjectMembership(role), rbac.ResourceDynSecret, action) {
+		apierror.Forbidden(w, "insufficient permissions")
+		return false
+	}
+	return true
 }
