@@ -3,23 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api-client'
 import type { DynamicProvider } from '@/types/api'
-
-const PROVIDER_TYPES = ['postgres'] as const
-
-const CONFIG_FIELDS: Record<string, { label: string; placeholder: string; secret?: boolean }[]> = {
-  postgres: [
-    { label: 'Host', placeholder: 'localhost' },
-    { label: 'Port', placeholder: '5432' },
-    { label: 'Database', placeholder: 'mydb' },
-    { label: 'Admin User', placeholder: 'postgres' },
-    { label: 'Admin Password', placeholder: '••••••••', secret: true },
-    { label: 'SSL Mode', placeholder: 'require' },
-  ],
-}
-
-const CONFIG_KEYS: Record<string, string[]> = {
-  postgres: ['host', 'port', 'database', 'admin_user', 'admin_password', 'ssl_mode'],
-}
+import { CreateProviderForm } from './create-provider-form'
 
 const DEFAULT_PROJECT_ID = ''
 
@@ -28,12 +12,6 @@ export default function ProvidersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-
-  // Form state
-  const [name, setName] = useState('')
-  const [providerType, setProviderType] = useState<string>('postgres')
-  const [configValues, setConfigValues] = useState<Record<string, string>>({})
   const [projectId] = useState(DEFAULT_PROJECT_ID)
 
   const fetchProviders = useCallback(async () => {
@@ -55,36 +33,10 @@ export default function ProvidersPage() {
     fetchProviders()
   }, [fetchProviders])
 
-  const handleConfigChange = (key: string, value: string) => {
-    setConfigValues(prev => ({ ...prev, [key]: value }))
+  const handleCreated = async () => {
+    setShowForm(false)
+    await fetchProviders()
   }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!projectId) {
-      setError('Project ID is required. Set it in URL or settings.')
-      return
-    }
-    setSubmitting(true)
-    setError(null)
-    try {
-      const keys = CONFIG_KEYS[providerType] ?? []
-      const config: Record<string, string> = {}
-      keys.forEach(k => { if (configValues[k]) config[k] = configValues[k] })
-      await api.providers.create(projectId, { name, provider_type: providerType, config })
-      setShowForm(false)
-      setName('')
-      setConfigValues({})
-      await fetchProviders()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create provider')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const fields = CONFIG_FIELDS[providerType] ?? []
-  const keys = CONFIG_KEYS[providerType] ?? []
 
   return (
     <div className="p-6 space-y-6">
@@ -109,66 +61,18 @@ export default function ProvidersPage() {
         </div>
       )}
 
-      {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-5 space-y-4">
-          <h2 className="text-base font-medium">New Provider</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Name</label>
-              <input
-                required
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="my-postgres"
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Type</label>
-              <select
-                value={providerType}
-                onChange={e => setProviderType(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                {PROVIDER_TYPES.map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+      {showForm && !projectId && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Project ID is required. Set it in URL or settings.
+        </div>
+      )}
 
-          <div className="grid grid-cols-2 gap-4">
-            {fields.map((f, i) => (
-              <div key={keys[i]} className="space-y-1">
-                <label className="text-sm font-medium">{f.label}</label>
-                <input
-                  type={f.secret ? 'password' : 'text'}
-                  value={configValues[keys[i]] ?? ''}
-                  onChange={e => handleConfigChange(keys[i], e.target.value)}
-                  placeholder={f.placeholder}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="px-4 py-2 text-sm rounded-md border hover:bg-accent transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {submitting ? 'Creating…' : 'Create Provider'}
-            </button>
-          </div>
-        </form>
+      {showForm && projectId && (
+        <CreateProviderForm
+          projectId={projectId}
+          onCreated={handleCreated}
+          onCancel={() => setShowForm(false)}
+        />
       )}
 
       {loading ? (

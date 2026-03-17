@@ -5,6 +5,27 @@ import (
 	"time"
 )
 
+// ProviderResponse is a safe, redacted view of a provider for API responses.
+// It omits config_enc / decrypted config fields containing admin credentials.
+type ProviderResponse struct {
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Name         string    `json:"name"`
+	ProviderType string    `json:"provider_type"`
+	Status       string    `json:"status"`
+}
+
+// ToResponse returns a redacted ProviderResponse safe for API consumers.
+func (pc *ProviderConfig) ToResponse() ProviderResponse {
+	return ProviderResponse{
+		ID:           pc.ID,
+		ProjectID:    pc.ProjectID,
+		Name:         pc.Name,
+		ProviderType: pc.ProviderType,
+		Status:       pc.Status,
+	}
+}
+
 // LeaseRequest is the input to Provider.Create.
 type LeaseRequest struct {
 	TTL       time.Duration

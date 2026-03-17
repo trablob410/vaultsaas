@@ -1,6 +1,7 @@
 mod config;
 mod client;
 mod crypto;
+mod dynsecret_tools;
 mod error;
 mod keychain;
 mod protocol;

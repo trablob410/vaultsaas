@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::keychain;
 use crate::protocol::ToolDef;
 use crate::scanner_tools;
+use crate::dynsecret_tools;
 
 pub fn list_tools() -> Vec<ToolDef> {
     vec![
@@ -128,23 +129,9 @@ pub async fn call_tool(name: &str, args: &Value, client: &ValtClient) -> Result<
         "authenticate_agent" => tool_authenticate_agent(args).await,
         "scan_secrets" => scanner_tools::tool_scan_secrets(args, client).await,
         "store_secret" => scanner_tools::tool_store_secret(args, client).await,
-        "request_dynamic_secret" => tool_request_dynamic_secret(args, client).await,
+        "request_dynamic_secret" => dynsecret_tools::tool_request_dynamic_secret(args, client).await,
         _ => Err(crate::error::ValtError::Protocol(format!("Unknown tool: {name}"))),
     }
-}
-
-async fn tool_request_dynamic_secret(args: &Value, client: &ValtClient) -> Result<Value> {
-    let provider_id = args["provider_id"].as_str()
-        .ok_or_else(|| crate::error::ValtError::Protocol("provider_id required".into()))?;
-    let ttl = args.get("ttl_seconds").and_then(|v| v.as_u64()).unwrap_or(300) as u32;
-    let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-    let result = client.create_dynamic_lease(provider_id, ttl, agent_id).await?;
-    Ok(json!({
-        "lease_id": result.get("id"),
-        "credentials": result.get("credentials"),
-        "expires_at": result.get("expires_at"),
-        "message": "Temporary credentials issued. They will auto-expire."
-    }))
 }
 
 async fn tool_request_access(args: &Value, client: &ValtClient) -> Result<Value> {

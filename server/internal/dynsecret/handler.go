@@ -79,7 +79,7 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(pc) //nolint:errcheck
+	json.NewEncoder(w).Encode(pc.ToResponse()) //nolint:errcheck
 }
 
 func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
@@ -92,8 +92,13 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	responses := make([]ProviderResponse, len(providers))
+	for i := range providers {
+		responses[i] = providers[i].ToResponse()
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"providers": providers}) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]interface{}{"providers": responses}) //nolint:errcheck
 }
 
 func (h *Handler) createLease(w http.ResponseWriter, r *http.Request) {
@@ -104,8 +109,9 @@ func (h *Handler) createLease(w http.ResponseWriter, r *http.Request) {
 		apierror.BadRequest(w, "invalid request body")
 		return
 	}
-	if req.TTLSeconds <= 0 {
-		req.TTLSeconds = 300
+	if req.TTLSeconds <= 0 || req.TTLSeconds > 3600 {
+		apierror.BadRequest(w, "ttl_seconds must be between 1 and 3600")
+		return
 	}
 
 	lease, err := h.service.CreateLease(r.Context(), providerID, req.AgentID, req.RequestID, req.TTLSeconds)
