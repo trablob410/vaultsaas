@@ -27,6 +27,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/notify"
 	"github.com/valt-dev/valt/server/internal/org"
 	"github.com/valt-dev/valt/server/internal/project"
+	"github.com/valt-dev/valt/server/internal/ratelimit"
 	"github.com/valt-dev/valt/server/internal/scanner"
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/internal/workflow"
@@ -109,6 +110,19 @@ func main() {
 	dynSvc := dynsecret.NewService(pool)
 	dynSvc.StartExpiryWorker(ctx)
 	dynHandler := dynsecret.NewHandler(dynSvc)
+
+	// Redis rate limiter (optional — skip if REDIS_URL not set)
+	var agentRateLimiter *ratelimit.RedisLimiter
+	if cfg.RedisURL != "" {
+		rl, err := ratelimit.NewRedisLimiter(cfg.RedisURL)
+		if err != nil {
+			log.Printf("Warning: Redis rate limiter init failed: %v", err)
+		} else {
+			agentRateLimiter = rl
+			defer agentRateLimiter.Close()
+		}
+	}
+	_ = agentRateLimiter // available for use in handlers
 
 	// Rate limiters
 	loginLimiter := custommiddleware.NewRateLimiter(5, 1*time.Minute)

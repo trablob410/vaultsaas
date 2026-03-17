@@ -38,6 +38,9 @@ type Config struct {
 	GoogleClientSecret string `envconfig:"GOOGLE_CLIENT_SECRET" default:""`
 	GoogleRedirectURL  string `envconfig:"GOOGLE_REDIRECT_URL" default:"http://localhost:8080/api/v1/auth/google/callback"`
 	DashboardURL       string `envconfig:"DASHBOARD_URL" default:"http://localhost:3000"`
+
+	// Redis (optional — empty disables Redis-backed features)
+	RedisURL string `envconfig:"REDIS_URL" default:""`
 }
 
 // Load reads configuration from environment variables.
