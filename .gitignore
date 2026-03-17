@@ -25,6 +25,9 @@ dashboard/out/
 # Rust
 mcp-server/target/
 
+# Git worktrees
+.worktrees/
+
 # Docker
 docker-compose.override.yml
 
