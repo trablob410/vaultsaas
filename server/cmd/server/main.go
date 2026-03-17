@@ -72,6 +72,12 @@ func main() {
 		log.Fatalf("Failed to init MinIO storage: %v", err)
 	}
 
+	// Decode master key for envelope encryption
+	masterKey, err := cfg.MasterKey()
+	if err != nil {
+		log.Fatalf("Failed to load master key: %v", err)
+	}
+
 	// Init services
 	auditLogger := audit.NewLogger(pool)
 	emailSender := notify.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom)
@@ -83,11 +89,11 @@ func main() {
 
 	authHandler := auth.NewHandler(pool, jwtMgr, cfg)
 	vaultService := vault.NewService(pool, storage)
-	vaultHandler := vault.NewHandler(vaultService)
+	vaultHandler := vault.NewHandler(vaultService, masterKey)
 
 	workflowSvc := workflow.NewService(pool)
 	credMgr := workflow.NewCredentialManager(pool)
-	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc)
+	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, masterKey)
 
 	auditHandler := audit.NewHandler(pool)
 
@@ -140,6 +146,7 @@ func main() {
 			r.Mount("/secrets", vaultHandler.Routes())
 			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
 			r.Get("/access-requests", workflowHandler.ListPending)
+			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)
 			r.Post("/access-requests/{request_id}/reject", workflowHandler.Reject)
 			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)

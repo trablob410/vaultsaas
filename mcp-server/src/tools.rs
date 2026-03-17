@@ -32,7 +32,7 @@ pub fn list_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "get_credential".into(),
-            description: "Retrieve an approved credential. Only works for approved requests.".into(),
+            description: "Retrieve an approved credential's value. Returns the secret value if the session is active.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -106,40 +106,47 @@ async fn tool_request_access(args: &Value, client: &ValtClient) -> Result<Value>
 async fn tool_check_status(args: &Value, client: &ValtClient) -> Result<Value> {
     let request_id = args["request_id"].as_str()
         .ok_or_else(|| crate::error::ValtError::Protocol("request_id required".into()))?;
-    let requests = client.get_access_requests(None).await?;
-    let requests_arr = requests.get("requests")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let found = requests_arr.iter().find(|r| {
-        r.get("id").and_then(|v| v.as_str()) == Some(request_id)
-    });
-    match found {
-        Some(req) => Ok(json!({
-            "request_id": request_id,
-            "status": req.get("status"),
-            "created_at": req.get("created_at"),
-            "approved_at": req.get("approved_at"),
-            "expires_at": req.get("expires_at"),
-            "rejection_reason": req.get("rejection_reason"),
-        })),
-        None => Ok(json!({"error": "Request not found", "request_id": request_id})),
-    }
+    // H4 fix: fetch single request directly instead of scanning the full list.
+    let req = client.get_access_request(request_id).await?;
+    Ok(json!({
+        "request_id": request_id,
+        "status": req.get("status"),
+        "created_at": req.get("created_at"),
+        "expires_at": req.get("expires_at"),
+        "rejection_reason": req.get("rejection_reason"),
+    }))
 }
 
 async fn tool_get_credential(args: &Value, client: &ValtClient) -> Result<Value> {
     let request_id = args["request_id"].as_str()
         .ok_or_else(|| crate::error::ValtError::Protocol("request_id required".into()))?;
     let cred = client.get_credential(request_id).await?;
-    // Return credential metadata; actual data accessible via resource URI
-    Ok(json!({
-        "credential_id": cred.get("id"),
-        "request_id": request_id,
-        "issued_at": cred.get("issued_at"),
-        "expires_at": cred.get("expires_at"),
-        "status": cred.get("status"),
-        "message": "Credential retrieved. Access data via vault://requests/{request_id} resource."
-    }))
+
+    let has_value = cred.get("value")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+
+    if has_value {
+        Ok(json!({
+            "credential_id": cred.get("id"),
+            "request_id": request_id,
+            "credential_type": cred.get("credential_type"),
+            "status": cred.get("status"),
+            "value": cred.get("value"),
+            "expires_at": cred.get("expires_at"),
+            "message": "Credential value retrieved successfully. Handle securely."
+        }))
+    } else {
+        Ok(json!({
+            "credential_id": cred.get("id"),
+            "request_id": request_id,
+            "credential_type": cred.get("credential_type"),
+            "status": cred.get("status"),
+            "expires_at": cred.get("expires_at"),
+            "message": "No credential value available. Check status -- may be expired or not yet approved."
+        }))
+    }
 }
 
 async fn tool_revoke_credential(args: &Value, client: &ValtClient) -> Result<Value> {

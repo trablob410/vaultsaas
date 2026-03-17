@@ -107,6 +107,11 @@ impl ValtClient {
         self.get(&path).await
     }
 
+    /// Fetch a single access request by ID (H4 fix: avoids full-list scan).
+    pub async fn get_access_request(&self, request_id: &str) -> Result<Value> {
+        self.get(&format!("/access-requests/{request_id}")).await
+    }
+
     pub async fn get_credential(&self, request_id: &str) -> Result<Value> {
         self.get(&format!("/credentials/{request_id}")).await
     }

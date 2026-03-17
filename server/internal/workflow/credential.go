@@ -19,6 +19,7 @@ type CredentialSession struct {
 	UsageCount      int        `json:"usage_count"`
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
+	Value           string     `json:"value,omitempty"` // decrypted secret value (populated on access)
 }
 
 // CredentialManager handles temporary credential lifecycle.

@@ -58,7 +58,7 @@ export default function ApprovalActions({ request, onClose, onSuccess }: Props) 
           <div className="space-y-4 mt-2">
             <div className="rounded-md bg-muted p-3 text-sm space-y-1">
               <div><span className="text-muted-foreground">Reason: </span>{request.reason}</div>
-              <div><span className="text-muted-foreground">Duration: </span>{request.duration_minutes} minutes</div>
+              <div><span className="text-muted-foreground">Duration: </span>{request.requested_duration_minutes} minutes</div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="review-reason">Note (required for rejection)</Label>

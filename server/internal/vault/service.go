@@ -200,6 +200,36 @@ func (s *Service) UpdateSecret(ctx context.Context, userID, secretID string, inp
 	return &secret, nil
 }
 
+// GetSecretByID fetches a secret by ID without owner constraint (for approved credential delivery).
+func (s *Service) GetSecretByID(ctx context.Context, secretID string) (*Secret, error) {
+	var secret Secret
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, user_id, name, description, storage_key, encrypted_dek,
+		        credential_type, source, version, policy, created_at, updated_at
+		 FROM secrets WHERE id = $1 AND deleted_at IS NULL`,
+		secretID,
+	).Scan(&secret.ID, &secret.UserID, &secret.Name, &secret.Description,
+		&secret.StorageKey, &secret.EncryptedDEK,
+		&secret.CredentialType, &secret.Source, &secret.Version,
+		&secret.Policy, &secret.CreatedAt, &secret.UpdatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("querying secret by id: %w", err)
+	}
+	return &secret, nil
+}
+
+// GetBlob retrieves the encrypted blob for a secret from object storage.
+func (s *Service) GetBlob(ctx context.Context, storageKey string) ([]byte, error) {
+	data, err := s.storage.Get(ctx, storageKey)
+	if err != nil {
+		return nil, fmt.Errorf("getting blob: %w", err)
+	}
+	return data, nil
+}
+
 func (s *Service) DeleteSecret(ctx context.Context, userID, secretID string) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE secrets SET deleted_at = NOW() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,

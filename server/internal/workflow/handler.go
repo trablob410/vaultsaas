@@ -13,26 +13,29 @@ import (
 	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/pkg/apierror"
+	"github.com/valt-dev/valt/server/pkg/crypto"
 	"github.com/valt-dev/valt/server/pkg/validator"
 )
 
 // Handler serves workflow HTTP endpoints.
 type Handler struct {
-	service    *Service
-	credMgr    *CredentialManager
-	vaultSvc   *vault.Service
-	auditLog   *audit.Logger
-	notifySvc  *notify.Service
+	service   *Service
+	credMgr   *CredentialManager
+	vaultSvc  *vault.Service
+	auditLog  *audit.Logger
+	notifySvc *notify.Service
+	masterKey []byte
 }
 
 // NewHandler creates a workflow Handler.
-func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Service, auditLog *audit.Logger, notifySvc *notify.Service) *Handler {
+func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Service, auditLog *audit.Logger, notifySvc *notify.Service, masterKey []byte) *Handler {
 	return &Handler{
 		service:   svc,
 		credMgr:   credMgr,
 		vaultSvc:  vaultSvc,
 		auditLog:  auditLog,
 		notifySvc: notifySvc,
+		masterKey: masterKey,
 	}
 }
 
@@ -164,8 +167,14 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up secret to get credential type
-	secret, _ := h.vaultSvc.GetSecret(r.Context(), userID, req.SecretID)
+	// C2/H1 fix: use GetSecretByID (no owner constraint) so approver ≠ owner works.
+	// Error is surfaced instead of silently swallowed.
+	secret, err := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
+	if err != nil {
+		log.Printf("Failed to fetch secret for credential issuance: %v", err)
+		apierror.InternalError(w, "failed to issue credential")
+		return
+	}
 	credType := ""
 	if secret != nil {
 		credType = secret.CredentialType
@@ -178,6 +187,36 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.auditLog.LogFromRequest(r, userID, "access_request.approve", "access_request", requestID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(req)
+}
+
+// GetRequest handles GET /access-requests/{request_id}
+func (h *Handler) GetRequest(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	requestID := chi.URLParam(r, "request_id")
+
+	if _, err := validator.ValidateUUID(requestID); err != nil {
+		apierror.BadRequest(w, "invalid request_id")
+		return
+	}
+
+	req, err := h.service.GetRequestByID(r.Context(), requestID)
+	if err != nil {
+		log.Printf("Failed to get request: %v", err)
+		apierror.InternalError(w, "failed to get request")
+		return
+	}
+	if req == nil {
+		apierror.NotFound(w, "request not found")
+		return
+	}
+	// Only the requester or the secret owner can view the request
+	if req.RequesterUserID != userID {
+		apierror.Forbidden(w, "not your request")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(req)
@@ -242,8 +281,37 @@ func (h *Handler) GetCredential(w http.ResponseWriter, r *http.Request) {
 
 	h.auditLog.LogFromRequest(r, userID, "credential.access", "credential_session", session.ID)
 
+	// Fetch secret by ID (no owner constraint — requester may not be owner)
+	secret, err := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
+	if err != nil {
+		log.Printf("Failed to fetch secret for credential delivery: %v", err)
+	}
+
+	// Decrypt and attach value if secret has an encrypted DEK
+	if secret != nil && len(secret.EncryptedDEK) > 0 {
+		blob, blobErr := h.vaultSvc.GetBlob(r.Context(), secret.StorageKey)
+		if blobErr != nil {
+			log.Printf("Failed to get blob for credential delivery: %v", blobErr)
+		} else {
+			dek, dekErr := crypto.DecryptAES256GCM(h.masterKey, secret.EncryptedDEK)
+			if dekErr != nil {
+				log.Printf("Failed to decrypt DEK for credential delivery: %v", dekErr)
+			} else {
+				plaintext, ptErr := crypto.DecryptAES256GCM(dek, blob)
+				if ptErr != nil {
+					log.Printf("Failed to decrypt blob for credential delivery: %v", ptErr)
+				} else {
+					session.Value = string(plaintext)
+				}
+				// Zero out DEK (best-effort)
+				for i := range dek {
+					dek[i] = 0
+				}
+			}
+		}
+	}
+
 	// Auto-revoke if single-use
-	secret, _ := h.vaultSvc.GetSecret(r.Context(), userID, req.SecretID)
 	if secret != nil {
 		p := policy.ForCredentialType(secret.CredentialType)
 		_ = h.credMgr.AutoRevokeIfSingleUse(r.Context(), requestID, p.SingleUse)
@@ -260,6 +328,22 @@ func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := validator.ValidateUUID(requestID); err != nil {
 		apierror.BadRequest(w, "invalid request_id")
+		return
+	}
+
+	// C1 fix: verify caller owns this access request before revoking.
+	req, err := h.service.GetRequestByID(r.Context(), requestID)
+	if err != nil {
+		log.Printf("Failed to get request for revoke: %v", err)
+		apierror.InternalError(w, "failed to get request")
+		return
+	}
+	if req == nil {
+		apierror.NotFound(w, "request not found")
+		return
+	}
+	if req.RequesterUserID != userID {
+		apierror.Forbidden(w, "not your request")
 		return
 	}
 

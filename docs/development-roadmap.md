@@ -66,6 +66,17 @@
 - [x] MCP server: `authenticate_agent` tool, VALT_AGENT_TOKEN env, agent token keychain storage
 - [x] Dashboard: /agents page (list + create), /agents/[id] page (detail + token management)
 
+### Phase 10: E2E Credential Delivery [DONE - 2026-03-17]
+- [x] server/pkg/crypto/aes.go — AES-256-GCM encrypt/decrypt, GenerateDEK
+- [x] config: VAULT_MASTER_KEY with cached ephemeral fallback
+- [x] vault/handler.go — accept plaintext value, server-side envelope encryption on create
+- [x] vault/service.go — GetSecretByID (no owner constraint), GetBlob
+- [x] workflow/handler.go — GetCredential decrypts blob and returns value; RevokeCredential ownership check; Approve uses GetSecretByID; GetRequest endpoint added
+- [x] workflow/credential.go — CredentialSession.Value field
+- [x] GET /access-requests/{request_id} route added
+- [x] mcp-server: get_credential returns value; check_approval_status uses single-request endpoint
+- [x] Dashboard: Credential type aligned to Go JSON tags; AccessRequest field names fixed; approval table duration and secret name display fixed
+
 ## Phase 2: Product-Market Fit [Future]
 - Zalo/Slack notifications
 - VSCode extension

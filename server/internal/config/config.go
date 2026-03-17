@@ -1,13 +1,18 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"log"
 
 	"github.com/kelseyhightower/envconfig"
 )
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
+	// cached ephemeral master key (C3 fix: MasterKey() is idempotent)
+	cachedMasterKey []byte
 	// Server
 	Port        string `envconfig:"PORT" default:"8080"`
 	CORSOrigins string `envconfig:"CORS_ORIGINS" default:"http://localhost:3000,http://localhost:8443"`
@@ -38,6 +43,36 @@ type Config struct {
 	GoogleClientSecret string `envconfig:"GOOGLE_CLIENT_SECRET" default:""`
 	GoogleRedirectURL  string `envconfig:"GOOGLE_REDIRECT_URL" default:"http://localhost:8080/api/v1/auth/google/callback"`
 	DashboardURL       string `envconfig:"DASHBOARD_URL" default:"http://localhost:3000"`
+
+	// Vault encryption
+	// VaultMasterKey is a base64-encoded 32-byte AES-256 key used to wrap DEKs.
+	// If not set, an ephemeral key is generated (secrets won't survive restart).
+	VaultMasterKey string `envconfig:"VAULT_MASTER_KEY" default:""`
+}
+
+// MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.
+// If VaultMasterKey is empty, an ephemeral key is generated once and cached (C3 fix).
+func (c *Config) MasterKey() ([]byte, error) {
+	if c.VaultMasterKey == "" {
+		if c.cachedMasterKey != nil {
+			return c.cachedMasterKey, nil
+		}
+		log.Println("WARNING: VAULT_MASTER_KEY not set, using ephemeral key - secrets will not survive restart")
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("generating ephemeral master key: %w", err)
+		}
+		c.cachedMasterKey = key
+		return key, nil
+	}
+	key, err := base64.StdEncoding.DecodeString(c.VaultMasterKey)
+	if err != nil {
+		return nil, fmt.Errorf("decoding VAULT_MASTER_KEY: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("VAULT_MASTER_KEY must be 32 bytes when decoded, got %d", len(key))
+	}
+	return key, nil
 }
 
 // Load reads configuration from environment variables.

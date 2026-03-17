@@ -11,6 +11,7 @@ import (
 
 	"github.com/valt-dev/valt/server/internal/auth"
 	"github.com/valt-dev/valt/server/pkg/apierror"
+	"github.com/valt-dev/valt/server/pkg/crypto"
 	"github.com/valt-dev/valt/server/pkg/validator"
 )
 
@@ -24,11 +25,12 @@ var validCredentialTypes = map[string]bool{
 }
 
 type Handler struct {
-	service *Service
+	service   *Service
+	masterKey []byte
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, masterKey []byte) *Handler {
+	return &Handler{service: service, masterKey: masterKey}
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -46,8 +48,9 @@ type createSecretRequest struct {
 	Description    string `json:"description"`
 	CredentialType string `json:"credential_type"`
 	Source         string `json:"source"`
-	EncryptedBlob  string `json:"encrypted_blob"` // base64
-	EncryptedDEK   string `json:"encrypted_dek"`  // base64
+	Value          string `json:"value"`          // plaintext (server encrypts)
+	EncryptedBlob  string `json:"encrypted_blob"` // base64 (pre-encrypted, backward compat)
+	EncryptedDEK   string `json:"encrypted_dek"`  // base64 (pre-encrypted, backward compat)
 	Policy         string `json:"policy"`
 }
 
@@ -70,14 +73,47 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	blob, err := base64.StdEncoding.DecodeString(req.EncryptedBlob)
-	if err != nil {
-		apierror.BadRequest(w, "invalid encrypted_blob encoding")
-		return
-	}
-	dek, err := base64.StdEncoding.DecodeString(req.EncryptedDEK)
-	if err != nil {
-		apierror.BadRequest(w, "invalid encrypted_dek encoding")
+	var blob, dek []byte
+
+	if req.Value != "" {
+		// Server-side envelope encryption path
+		rawDEK, err := crypto.GenerateDEK()
+		if err != nil {
+			log.Printf("Failed to generate DEK: %v", err)
+			apierror.InternalError(w, "failed to generate encryption key")
+			return
+		}
+		blob, err = crypto.EncryptAES256GCM(rawDEK, []byte(req.Value))
+		if err != nil {
+			log.Printf("Failed to encrypt value: %v", err)
+			apierror.InternalError(w, "failed to encrypt secret value")
+			return
+		}
+		dek, err = crypto.EncryptAES256GCM(h.masterKey, rawDEK)
+		if err != nil {
+			log.Printf("Failed to wrap DEK: %v", err)
+			apierror.InternalError(w, "failed to wrap encryption key")
+			return
+		}
+		// Zero out rawDEK (best-effort)
+		for i := range rawDEK {
+			rawDEK[i] = 0
+		}
+	} else if req.EncryptedBlob != "" {
+		// Pre-encrypted path (backward compat / future client-side encryption)
+		var err error
+		blob, err = base64.StdEncoding.DecodeString(req.EncryptedBlob)
+		if err != nil {
+			apierror.BadRequest(w, "invalid encrypted_blob encoding")
+			return
+		}
+		dek, err = base64.StdEncoding.DecodeString(req.EncryptedDEK)
+		if err != nil {
+			apierror.BadRequest(w, "invalid encrypted_dek encoding")
+			return
+		}
+	} else {
+		apierror.BadRequest(w, "value or encrypted_blob is required")
 		return
 	}
 
@@ -151,8 +187,9 @@ func (h *Handler) getSecret(w http.ResponseWriter, r *http.Request) {
 type updateSecretRequest struct {
 	Name          string `json:"name"`
 	Description   string `json:"description"`
-	EncryptedBlob string `json:"encrypted_blob"` // base64
-	EncryptedDEK  string `json:"encrypted_dek"`  // base64
+	Value         string `json:"value"`          // plaintext (server encrypts)
+	EncryptedBlob string `json:"encrypted_blob"` // base64 (pre-encrypted)
+	EncryptedDEK  string `json:"encrypted_dek"`  // base64 (pre-encrypted)
 }
 
 func (h *Handler) updateSecret(w http.ResponseWriter, r *http.Request) {
@@ -171,20 +208,45 @@ func (h *Handler) updateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var blob, dek []byte
-	if req.EncryptedBlob != "" {
-		var err error
-		blob, err = base64.StdEncoding.DecodeString(req.EncryptedBlob)
+	if req.Value != "" {
+		// Server-side envelope encryption path
+		rawDEK, err := crypto.GenerateDEK()
 		if err != nil {
-			apierror.BadRequest(w, "invalid encrypted_blob encoding")
+			log.Printf("Failed to generate DEK for update: %v", err)
+			apierror.InternalError(w, "failed to generate encryption key")
 			return
 		}
-	}
-	if req.EncryptedDEK != "" {
-		var err error
-		dek, err = base64.StdEncoding.DecodeString(req.EncryptedDEK)
+		blob, err = crypto.EncryptAES256GCM(rawDEK, []byte(req.Value))
 		if err != nil {
-			apierror.BadRequest(w, "invalid encrypted_dek encoding")
+			log.Printf("Failed to encrypt value for update: %v", err)
+			apierror.InternalError(w, "failed to encrypt secret value")
 			return
+		}
+		dek, err = crypto.EncryptAES256GCM(h.masterKey, rawDEK)
+		if err != nil {
+			log.Printf("Failed to wrap DEK for update: %v", err)
+			apierror.InternalError(w, "failed to wrap encryption key")
+			return
+		}
+		for i := range rawDEK {
+			rawDEK[i] = 0
+		}
+	} else {
+		if req.EncryptedBlob != "" {
+			var err error
+			blob, err = base64.StdEncoding.DecodeString(req.EncryptedBlob)
+			if err != nil {
+				apierror.BadRequest(w, "invalid encrypted_blob encoding")
+				return
+			}
+		}
+		if req.EncryptedDEK != "" {
+			var err error
+			dek, err = base64.StdEncoding.DecodeString(req.EncryptedDEK)
+			if err != nil {
+				apierror.BadRequest(w, "invalid encrypted_dek encoding")
+				return
+			}
 		}
 	}
 

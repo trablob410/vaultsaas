@@ -79,9 +79,15 @@ export default function ApprovalList() {
             <TableBody>
               {requests.map((req) => (
                 <TableRow key={req.id}>
-                  <TableCell className="font-mono text-xs">{req.secret_id.slice(0, 8)}…</TableCell>
+                  <TableCell className="text-sm font-medium">
+                    {req.secret_name ?? `${req.secret_id.slice(0, 8)}…`}
+                  </TableCell>
                   <TableCell className="max-w-[200px] truncate text-sm">{req.reason}</TableCell>
-                  <TableCell className="text-sm">{req.duration_minutes}m</TableCell>
+                  <TableCell className="text-sm">
+                    {req.requested_duration_minutes >= 60
+                      ? `${Math.floor(req.requested_duration_minutes / 60)} hr${Math.floor(req.requested_duration_minutes / 60) > 1 ? 's' : ''}`
+                      : `${req.requested_duration_minutes} min`}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={statusVariant(req.status)}>{req.status}</Badge>
                   </TableCell>

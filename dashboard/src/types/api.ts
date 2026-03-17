@@ -13,27 +13,30 @@ export interface Secret {
 export interface AccessRequest {
   id: string
   secret_id: string
-  requester_id: string
-  reason: string
-  duration_minutes: number
+  secret_name?: string
+  requester_user_id: string
+  requester_type: string
+  ai_agent_id?: string
+  reason?: string
+  requested_duration_minutes: number
   status: 'pending' | 'approved' | 'rejected' | 'expired' | 'revoked'
-  policy_tier: number
-  created_at: string
-  updated_at: string
-  approved_at?: string
+  decided_by?: string
+  decided_at?: string
   expires_at?: string
-  rejected_at?: string
   rejection_reason?: string
+  created_at: string
 }
 
 export interface Credential {
   id: string
-  request_id: string
-  credential_data: string
-  issued_at: string
-  expires_at: string
-  revoked_at?: string
+  access_request_id: string
+  credential_type?: string
   status: string
+  expires_at: string
+  usage_count: number
+  revoked_at?: string
+  created_at: string
+  value?: string
 }
 
 export interface AuditLog {

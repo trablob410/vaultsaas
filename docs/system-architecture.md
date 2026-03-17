@@ -285,9 +285,7 @@ MCP Server (Rust)
 - `authenticate_agent` MCP tool accepts a token, stores it in the OS keychain, and clears `VALT_AGENT_TOKEN` env usage.
 
 ## Security Architecture
-- Zero-knowledge: server never sees plaintext
-- Envelope encryption: secret → DEK → user master key
-- Master key derived client-side from password (Argon2id)
+- Envelope encryption: server-side AES-256-GCM. Random DEK encrypts each secret value. Master KEK (VAULT_MASTER_KEY env var) wraps DEK. Pattern: AWS Secrets Manager / HashiCorp Vault.
 - JWT RS256 (15min access, 7day refresh)
 - Sliding-window rate limiting on all routes
 - Security headers enforced via middleware

@@ -13,19 +13,20 @@ import (
 
 // AccessRequest represents an access request row.
 type AccessRequest struct {
-	ID                      string     `json:"id"`
-	SecretID                string     `json:"secret_id"`
-	RequesterUserID         string     `json:"requester_user_id"`
-	RequesterType           string     `json:"requester_type"`
-	AIAgentID               *string    `json:"ai_agent_id,omitempty"`
-	Status                  string     `json:"status"`
-	Reason                  *string    `json:"reason,omitempty"`
-	RejectionReason         *string    `json:"rejection_reason,omitempty"`
-	RequestedDurationMinutes int       `json:"requested_duration_minutes"`
-	DecidedBy               *string    `json:"decided_by,omitempty"`
-	DecidedAt               *time.Time `json:"decided_at,omitempty"`
-	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
-	CreatedAt               time.Time  `json:"created_at"`
+	ID                       string     `json:"id"`
+	SecretID                 string     `json:"secret_id"`
+	SecretName               string     `json:"secret_name,omitempty"`
+	RequesterUserID          string     `json:"requester_user_id"`
+	RequesterType            string     `json:"requester_type"`
+	AIAgentID                *string    `json:"ai_agent_id,omitempty"`
+	Status                   string     `json:"status"`
+	Reason                   *string    `json:"reason,omitempty"`
+	RejectionReason          *string    `json:"rejection_reason,omitempty"`
+	RequestedDurationMinutes int        `json:"requested_duration_minutes"`
+	DecidedBy                *string    `json:"decided_by,omitempty"`
+	DecidedAt                *time.Time `json:"decided_at,omitempty"`
+	ExpiresAt                *time.Time `json:"expires_at,omitempty"`
+	CreatedAt                time.Time  `json:"created_at"`
 }
 
 // CreateRequestInput holds the data for creating an access request.
@@ -143,11 +144,12 @@ func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, l
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT ar.id, ar.secret_id, ar.requester_user_id, ar.requester_type, ar.ai_agent_id,
+		`SELECT ar.id, ar.secret_id, COALESCE(s.name, '') AS secret_name,
+		        ar.requester_user_id, ar.requester_type, ar.ai_agent_id,
 		        ar.status, ar.reason, ar.requested_duration_minutes, ar.decided_by, ar.decided_at, ar.expires_at, ar.created_at
 		 FROM access_requests ar
-		 JOIN secrets s ON s.id = ar.secret_id
-		 WHERE s.user_id = $1 AND ar.status = $2 AND s.deleted_at IS NULL
+		 JOIN secrets s ON s.id = ar.secret_id AND s.user_id = $1 AND s.deleted_at IS NULL
+		 WHERE ar.status = $2
 		 ORDER BY ar.created_at DESC LIMIT $3 OFFSET $4`,
 		ownerUserID, filterStatus, limit, offset,
 	)
@@ -159,7 +161,7 @@ func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, l
 	var requests []AccessRequest
 	for rows.Next() {
 		var r AccessRequest
-		if err := rows.Scan(&r.ID, &r.SecretID, &r.RequesterUserID, &r.RequesterType,
+		if err := rows.Scan(&r.ID, &r.SecretID, &r.SecretName, &r.RequesterUserID, &r.RequesterType,
 			&r.AIAgentID, &r.Status, &r.Reason, &r.RequestedDurationMinutes,
 			&r.DecidedBy, &r.DecidedAt, &r.ExpiresAt, &r.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scanning request: %w", err)
