@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/valt-dev/valt/server/internal/agent"
 	"github.com/valt-dev/valt/server/internal/audit"
 	"github.com/valt-dev/valt/server/internal/auth"
 	"github.com/valt-dev/valt/server/internal/notify"
@@ -25,10 +27,11 @@ type Handler struct {
 	auditLog  *audit.Logger
 	notifySvc *notify.Service
 	masterKey []byte
+	pool      *pgxpool.Pool
 }
 
 // NewHandler creates a workflow Handler.
-func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Service, auditLog *audit.Logger, notifySvc *notify.Service, masterKey []byte) *Handler {
+func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Service, auditLog *audit.Logger, notifySvc *notify.Service, masterKey []byte, pool *pgxpool.Pool) *Handler {
 	return &Handler{
 		service:   svc,
 		credMgr:   credMgr,
@@ -36,6 +39,7 @@ func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Servic
 		auditLog:  auditLog,
 		notifySvc: notifySvc,
 		masterKey: masterKey,
+		pool:      pool,
 	}
 }
 
@@ -49,8 +53,14 @@ type createRequestBody struct {
 // CreateRequest handles POST /secrets/{secret_id}/access-requests
 func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
-	secretID := chi.URLParam(r, "secret_id")
+	agentID := agent.AgentIDFromContext(r.Context())
 
+	if userID == "" && agentID == "" {
+		apierror.Unauthorized(w, "authentication required")
+		return
+	}
+
+	secretID := chi.URLParam(r, "secret_id")
 	if _, err := validator.ValidateUUID(secretID); err != nil {
 		apierror.BadRequest(w, "invalid secret_id")
 		return
@@ -62,7 +72,10 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.RequesterType == "" {
+	// Derive requester_type from auth context
+	if agentID != "" {
+		body.RequesterType = "ai_agent"
+	} else if body.RequesterType == "" {
 		body.RequesterType = "human"
 	}
 	if body.RequesterType != "human" && body.RequesterType != "ai_agent" {
@@ -70,8 +83,8 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the secret to get credential_type
-	secret, err := h.vaultSvc.GetSecret(r.Context(), userID, secretID)
+	// Fetch secret without owner constraint
+	secret, err := h.vaultSvc.GetSecretByID(r.Context(), secretID)
 	if err != nil {
 		log.Printf("Failed to get secret for access request: %v", err)
 		apierror.InternalError(w, "failed to validate secret")
@@ -82,11 +95,55 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Authorization: project-scoped or owner-only for legacy secrets
+	if secret.ProjectID != nil {
+		if agentID != "" {
+			// Agent: check agent_identities.project_id == secret.project_id
+			var agentProjectID string
+			qErr := h.pool.QueryRow(r.Context(),
+				`SELECT project_id FROM agent_identities WHERE id = $1 AND status = 'active'`,
+				agentID,
+			).Scan(&agentProjectID)
+			if qErr != nil || agentProjectID != *secret.ProjectID {
+				apierror.Forbidden(w, "agent not in secret's project")
+				return
+			}
+		} else {
+			// User: check project membership
+			var memberCount int
+			qErr := h.pool.QueryRow(r.Context(),
+				`SELECT COUNT(*) FROM project_memberships WHERE project_id = $1 AND user_id = $2`,
+				*secret.ProjectID, userID,
+			).Scan(&memberCount)
+			if qErr != nil || memberCount == 0 {
+				apierror.Forbidden(w, "not a member of the secret's project")
+				return
+			}
+		}
+	} else {
+		// Legacy secret (no project): owner-only
+		if secret.UserID != userID {
+			apierror.Forbidden(w, "only the owner can request access to this secret")
+			return
+		}
+	}
+
+	// Use agentID from context (authoritative) over body value
+	requestAgentID := body.AIAgentID
+	if agentID != "" {
+		requestAgentID = agentID
+	}
+
+	callerDesc := userID
+	if agentID != "" {
+		callerDesc = "agent:" + agentID
+	}
+
 	req, err := h.service.CreateRequest(r.Context(), CreateRequestInput{
 		SecretID:        secretID,
 		RequesterUserID: userID,
 		RequesterType:   body.RequesterType,
-		AIAgentID:       body.AIAgentID,
+		AIAgentID:       requestAgentID,
 		Reason:          body.Reason,
 		DurationMinutes: body.DurationMinutes,
 		CredentialType:  secret.CredentialType,
@@ -96,7 +153,7 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.auditLog.LogFromRequest(r, userID, "access_request.create", "access_request", req.ID)
+	h.auditLog.LogFromRequest(r, callerDesc, "access_request.create", "access_request", req.ID)
 
 	// Auto-approve for Tier 1: issue credential immediately
 	if req.Status == "approved" {
@@ -109,7 +166,7 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 	// Notify if policy requires it
 	p := policy.ForCredentialType(secret.CredentialType)
 	if p.NotifyOnAccess && h.notifySvc != nil {
-		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), "", secret.Name, userID, body.Reason)
+		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), "", secret.Name, callerDesc, body.Reason)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -183,8 +240,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// C2/H1 fix: use GetSecretByID (no owner constraint) so approver ≠ owner works.
-	// Error is surfaced instead of silently swallowed.
+	// Use GetSecretByID (no owner constraint) so approver != owner works.
 	secret, err := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
 	if err != nil {
 		log.Printf("Failed to fetch secret for credential issuance: %v", err)
@@ -230,11 +286,14 @@ func (h *Handler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		apierror.NotFound(w, "request not found")
 		return
 	}
-	// Only the requester, an assigned approver, or the secret owner can view the request
-	if req.RequesterUserID != userID {
+
+	agentID := agent.AgentIDFromContext(r.Context())
+	callerIsRequester := (userID != "" && req.RequesterUserID == userID) ||
+		(agentID != "" && req.AIAgentID != nil && *req.AIAgentID == agentID)
+	if !callerIsRequester {
 		isApprover, _ := h.service.IsAssignedApprover(r.Context(), requestID, userID)
 		isOwner := false
-		if !isApprover {
+		if !isApprover && userID != "" {
 			secret, _ := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
 			isOwner = secret != nil && secret.UserID == userID
 		}
@@ -310,7 +369,11 @@ func (h *Handler) GetCredential(w http.ResponseWriter, r *http.Request) {
 		apierror.NotFound(w, "request not found")
 		return
 	}
-	if req.RequesterUserID != userID {
+
+	agentID := agent.AgentIDFromContext(r.Context())
+	callerIsRequester := (userID != "" && req.RequesterUserID == userID) ||
+		(agentID != "" && req.AIAgentID != nil && *req.AIAgentID == agentID)
+	if !callerIsRequester {
 		apierror.Forbidden(w, "not your request")
 		return
 	}
@@ -321,7 +384,11 @@ func (h *Handler) GetCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.auditLog.LogFromRequest(r, userID, "credential.access", "credential_session", session.ID)
+	callerDesc := userID
+	if agentID != "" {
+		callerDesc = "agent:" + agentID
+	}
+	h.auditLog.LogFromRequest(r, callerDesc, "credential.access", "credential_session", session.ID)
 
 	// Fetch secret by ID (no owner constraint — requester may not be owner)
 	secret, err := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
@@ -373,7 +440,7 @@ func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// C1 fix: verify caller owns this access request before revoking.
+	// Verify caller owns this access request before revoking.
 	req, err := h.service.GetRequestByID(r.Context(), requestID)
 	if err != nil {
 		log.Printf("Failed to get request for revoke: %v", err)
@@ -384,7 +451,11 @@ func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 		apierror.NotFound(w, "request not found")
 		return
 	}
-	if req.RequesterUserID != userID {
+
+	agentID := agent.AgentIDFromContext(r.Context())
+	callerIsRequester := (userID != "" && req.RequesterUserID == userID) ||
+		(agentID != "" && req.AIAgentID != nil && *req.AIAgentID == agentID)
+	if !callerIsRequester {
 		apierror.Forbidden(w, "not your request")
 		return
 	}
@@ -394,7 +465,11 @@ func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.auditLog.LogFromRequest(r, userID, "credential.revoke", "credential_session", requestID)
+	callerDesc := userID
+	if agentID != "" {
+		callerDesc = "agent:" + agentID
+	}
+	h.auditLog.LogFromRequest(r, callerDesc, "credential.revoke", "credential_session", requestID)
 
 	w.WriteHeader(http.StatusNoContent)
 }

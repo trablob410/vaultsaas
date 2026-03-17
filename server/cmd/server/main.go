@@ -33,6 +33,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/internal/workflow"
 	"github.com/valt-dev/valt/server/internal/workspace"
+	"github.com/valt-dev/valt/server/pkg/apierror"
 )
 
 func main() {
@@ -97,7 +98,7 @@ func main() {
 
 	workflowSvc := workflow.NewService(pool)
 	credMgr := workflow.NewCredentialManager(pool)
-	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, masterKey)
+	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, masterKey, pool)
 
 	auditHandler := audit.NewHandler(pool)
 
@@ -173,13 +174,9 @@ func main() {
 			}
 
 			r.Mount("/secrets", vaultHandler.Routes())
-			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
 			r.Get("/access-requests", workflowHandler.ListPending)
-			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)
 			r.Post("/access-requests/{request_id}/reject", workflowHandler.Reject)
-			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
-			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
 			r.Mount("/audit", auditHandler.Routes())
 			r.Mount("/consent", consentHandler.Routes())
 			r.Mount("/orgs", orgHandler.Routes())
@@ -189,6 +186,16 @@ func main() {
 			r.Mount("/", scannerHandler.Routes())
 			r.Mount("/", dynHandler.Routes())
 			r.Mount("/", usageHandler.Routes())
+		})
+
+		// Dual-auth routes: accept either user JWT or agent bearer token
+		r.Group(func(r chi.Router) {
+			r.Use(dualAuthMiddleware(jwtMgr, agentSvc))
+			r.Use(apiLimiter.Middleware())
+			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
+			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
+			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
+			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
 		})
 	})
 
@@ -214,6 +221,40 @@ func main() {
 		log.Fatalf("Server shutdown failed: %v", err)
 	}
 	log.Println("Server stopped")
+}
+
+func dualAuthMiddleware(jwtMgr *auth.JWTManager, agentSvc *agent.Service) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				apierror.Unauthorized(w, "missing authorization header")
+				return
+			}
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+				apierror.Unauthorized(w, "invalid authorization format")
+				return
+			}
+			token := parts[1]
+
+			// Try JWT first (no DB lookup)
+			if userID, err := jwtMgr.ValidateAccessToken(token); err == nil {
+				ctx := auth.WithUserID(r.Context(), userID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Fallback: try agent token
+			if agentToken, err := agentSvc.ValidateToken(r.Context(), token); err == nil && agentToken != nil {
+				ctx := agent.WithAgentID(r.Context(), agentToken.AgentID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			apierror.Unauthorized(w, "invalid or expired token")
+		})
+	}
 }
 
 type healthResponse struct {

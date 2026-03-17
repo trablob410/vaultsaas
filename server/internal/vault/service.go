@@ -14,6 +14,7 @@ import (
 type Secret struct {
 	ID             string     `json:"id"`
 	UserID         string     `json:"user_id"`
+	ProjectID      *string    `json:"project_id,omitempty"`
 	Name           string     `json:"name"`
 	Description    string     `json:"description,omitempty"`
 	CredentialType string     `json:"credential_type"`
@@ -205,13 +206,15 @@ func (s *Service) GetSecretByID(ctx context.Context, secretID string) (*Secret, 
 	var secret Secret
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, user_id, name, description, storage_key, encrypted_dek,
-		        credential_type, source, version, policy, created_at, updated_at
+		        credential_type, source, version, policy, created_at, updated_at,
+		        project_id
 		 FROM secrets WHERE id = $1 AND deleted_at IS NULL`,
 		secretID,
 	).Scan(&secret.ID, &secret.UserID, &secret.Name, &secret.Description,
 		&secret.StorageKey, &secret.EncryptedDEK,
 		&secret.CredentialType, &secret.Source, &secret.Version,
-		&secret.Policy, &secret.CreatedAt, &secret.UpdatedAt)
+		&secret.Policy, &secret.CreatedAt, &secret.UpdatedAt,
+		&secret.ProjectID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil

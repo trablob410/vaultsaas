@@ -94,7 +94,11 @@ impl ValtClient {
     pub async fn create_access_request(&self, secret_id: &str, reason: &str, duration_minutes: u32) -> Result<Value> {
         self.post(
             &format!("/secrets/{secret_id}/access-requests"),
-            serde_json::json!({ "reason": reason, "duration_minutes": duration_minutes }),
+            serde_json::json!({
+                "requester_type": "ai_agent",
+                "reason": reason,
+                "duration_minutes": duration_minutes
+            }),
         ).await
     }
 

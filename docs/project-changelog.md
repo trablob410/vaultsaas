@@ -1,5 +1,36 @@
 # Project Changelog
 
+## [1.5.0] - 2026-03-18 — P0 Gap: Agent Cross-User Access Request
+
+### Fixed
+
+**Agent Auth Wiring (Phase 1)**
+- `auth/middleware.go`: added `WithUserID` context setter
+- `agent/middleware.go`: added `WithAgentID` context setter
+- `cmd/server/main.go`: `dualAuthMiddleware` wired to workflow routes; dual-auth route group added; `NewHandler` updated to accept pool
+
+**CreateRequest Project-Scope Guard (Phase 2)**
+- `vault/service.go`: `Secret` struct gains `ProjectID *string`; `GetSecretByID` SQL now selects `project_id`
+- `workflow/handler.go`: `CreateRequest` rejects agent requests where `agent.project_id != secret.project_id`; dual-auth path reads agent context; fixed `GetCredential`, `RevokeCredential`, `GetRequest` to work for agent callers; pool field added to handler
+- `workflow/service.go`: dual-path rate limit (agent vs user); COALESCE scans on list query
+- Migration `000025`: makes `requester_user_id` nullable (was `NOT NULL REFERENCES users(id)`) to support agent-only requests
+
+**MCP Client (Phase 3)**
+- `mcp-server/src/client.rs`: `create_access_request` now sends `requester_type: "ai_agent"` in request body
+
+**Tests (Phase 4)**
+- 30 new tests covering dual-auth middleware, project-scope guard, nullable requester, and MCP client field
+
+### Security Impact
+| Finding | Severity | Status |
+|---------|----------|--------|
+| Agents unable to auth on workflow routes (never wired) | CRITICAL | Fixed |
+| CreateRequest owner-filter blocks cross-user agent requests | HIGH | Fixed |
+| requester_user_id NOT NULL prevents agent-only requests | HIGH | Fixed |
+| MCP client missing requester_type field | MEDIUM | Fixed |
+
+---
+
 ## [1.4.0] - 2026-03-17 — Phase 16: Security Hardening
 
 ### Added

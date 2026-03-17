@@ -18,6 +18,11 @@ func AgentIDFromContext(ctx context.Context) string {
 	return v
 }
 
+// WithAgentID returns a context with the given agent ID set.
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, agentIDKey, agentID)
+}
+
 // AuthMiddleware validates agent Bearer tokens and stores the agent ID in context.
 func AuthMiddleware(svc *Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

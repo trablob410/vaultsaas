@@ -18,7 +18,7 @@ vaultsaas/
 │   │   ├── audit/           # Structured logger, SHA-256 hash chain, GET /audit/logs (Phase 1.4)
 │   │   ├── notify/          # SMTP email notifications, no-op fallback (Phase 1.4)
 │   │   ├── consent/         # User consent recording, POST /consent (Phase 1.4)
-│   │   ├── workflow/        # Approval state machine, multi-step approval chains, policy enforcement; IsAssignedApprover; rejection_reason persistence; approver/owner access checks on GetRequest/Approve/Reject/IssueCredential (Phase 1.4/13/hardening)
+│   │   ├── workflow/        # Approval state machine, multi-step approval chains, policy enforcement; IsAssignedApprover; rejection_reason persistence; approver/owner access checks on GetRequest/Approve/Reject/IssueCredential; dual-auth (user+agent) on CreateRequest/GetCredential/RevokeCredential; project-scope guard for agent cross-user requests; migration 000025 makes requester_user_id nullable (Phase 1.4/13/hardening/p0-gap)
 │   │   ├── config/          # GoogleClientID/Secret/RedirectURL, DashboardURL (Phase 1.5)
 │   │   ├── org/             # Organization CRUD, membership management (Phase 8)
 │   │   ├── workspace/       # Workspace CRUD under org (Phase 8)
@@ -147,8 +147,10 @@ vaultsaas/
 | 13 Enhanced RBAC + Policies | DONE — 2026-03-17 |
 | 14 CLI + SDKs | DONE — 2026-03-17 |
 | 15 Cloud Free Tier | DONE — 2026-03-17 |
+| 16 Security Hardening | DONE — 2026-03-17 |
+| P0 Gap: Agent Cross-User Access Request | DONE — 2026-03-18 |
 
-- **server**: All Phase 1.3-1.5 backend live; Google OAuth2, org/workspace/project hierarchy, agent identity, secret scanner, dynamic secrets, RBAC, rate limiting, usage/free tier; security hardening (AES-256-GCM on provider configs + lease credentials, RBAC on scanner/dynsecret project routes, rate limiter gated on X-Agent-ID, rejection_reason on approval_steps, org-scoped usage COUNT, approver/owner access checks on workflow); migrations 000001-000024; 74+ Go unit tests passing
+- **server**: All Phase 1.3-1.5 backend live; Google OAuth2, org/workspace/project hierarchy, agent identity, secret scanner, dynamic secrets, RBAC, rate limiting, usage/free tier; security hardening (AES-256-GCM on provider configs + lease credentials, RBAC on scanner/dynsecret project routes, rate limiter gated on X-Agent-ID, rejection_reason on approval_steps, org-scoped usage COUNT, approver/owner access checks on workflow); P0 gap fix: dual-auth middleware on workflow routes, project-scope guard for agent cross-user requests, migration 000025 (nullable requester_user_id); migrations 000001-000025; 74+ Go unit tests + 30 new passing
 - **dashboard**: Full Next.js App Router — sign-in, secrets CRUD, approvals, audit, orgs, projects, agents, scans, providers, settings/upgrade; BFF proxy; 19 vitest tests passing
 - **mcp-server**: 8 MCP tools, 3 resources; stdio + HTTP/SSE dual transport (axum); Bearer auth; 17 regex scanner patterns; OS keychain auth; 11+ unit tests passing
 - **sdk**: Go SDK (`github.com/valt-dev/valt-go`, stdlib only) and Python SDK (urllib only)

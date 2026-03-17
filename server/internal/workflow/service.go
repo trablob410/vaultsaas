@@ -67,14 +67,24 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 
 	// Check daily request limit
 	var dailyCount int
-	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM access_requests
-		 WHERE requester_user_id = $1 AND secret_id = $2
-		   AND created_at >= NOW() - INTERVAL '24 hours'`,
-		input.RequesterUserID, input.SecretID,
-	).Scan(&dailyCount)
-	if err != nil {
-		return nil, fmt.Errorf("checking daily limit: %w", err)
+	var dailyErr error
+	if input.RequesterUserID != "" {
+		dailyErr = s.pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM access_requests
+			 WHERE requester_user_id = $1 AND secret_id = $2
+			   AND created_at >= NOW() - INTERVAL '24 hours'`,
+			input.RequesterUserID, input.SecretID,
+		).Scan(&dailyCount)
+	} else {
+		dailyErr = s.pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM access_requests
+			 WHERE ai_agent_id = $1 AND secret_id = $2
+			   AND created_at >= NOW() - INTERVAL '24 hours'`,
+			input.AIAgentID, input.SecretID,
+		).Scan(&dailyCount)
+	}
+	if dailyErr != nil {
+		return nil, fmt.Errorf("checking daily limit: %w", dailyErr)
 	}
 	if dailyCount >= p.MaxRequestsPerDay {
 		return nil, fmt.Errorf("daily request limit (%d) exceeded", p.MaxRequestsPerDay)
@@ -83,14 +93,24 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 	// Check cool-down
 	if p.CoolDownMinutes > 0 {
 		var recentCount int
-		err := s.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM access_requests
-			 WHERE requester_user_id = $1 AND secret_id = $2
-			   AND created_at >= NOW() - INTERVAL '1 minute' * $3`,
-			input.RequesterUserID, input.SecretID, p.CoolDownMinutes,
-		).Scan(&recentCount)
-		if err != nil {
-			return nil, fmt.Errorf("checking cool-down: %w", err)
+		var coolErr error
+		if input.RequesterUserID != "" {
+			coolErr = s.pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM access_requests
+				 WHERE requester_user_id = $1 AND secret_id = $2
+				   AND created_at >= NOW() - INTERVAL '1 minute' * $3`,
+				input.RequesterUserID, input.SecretID, p.CoolDownMinutes,
+			).Scan(&recentCount)
+		} else {
+			coolErr = s.pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM access_requests
+				 WHERE ai_agent_id = $1 AND secret_id = $2
+				   AND created_at >= NOW() - INTERVAL '1 minute' * $3`,
+				input.AIAgentID, input.SecretID, p.CoolDownMinutes,
+			).Scan(&recentCount)
+		}
+		if coolErr != nil {
+			return nil, fmt.Errorf("checking cool-down: %w", coolErr)
 		}
 		if recentCount > 0 {
 			return nil, fmt.Errorf("please wait %d minutes between requests", p.CoolDownMinutes)
@@ -108,18 +128,22 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 	if input.AIAgentID != "" {
 		aiAgentID = &input.AIAgentID
 	}
+	var requesterUserID *string
+	if input.RequesterUserID != "" {
+		requesterUserID = &input.RequesterUserID
+	}
 
-	err = s.pool.QueryRow(ctx,
+	insertErr := s.pool.QueryRow(ctx,
 		`INSERT INTO access_requests (secret_id, requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, secret_id, requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
-		input.SecretID, input.RequesterUserID, input.RequesterType, aiAgentID,
+		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
+		input.SecretID, requesterUserID, input.RequesterType, aiAgentID,
 		initialStatus, input.Reason, dur,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
 		&req.AIAgentID, &req.Status, &req.Reason, &req.RequestedDurationMinutes,
 		&req.DecidedBy, &req.DecidedAt, &req.ExpiresAt, &req.CreatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("inserting access request: %w", err)
+	if insertErr != nil {
+		return nil, fmt.Errorf("inserting access request: %w", insertErr)
 	}
 
 	return &req, nil
@@ -145,7 +169,7 @@ func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, l
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT ar.id, ar.secret_id, COALESCE(s.name, '') AS secret_name,
-		        ar.requester_user_id, ar.requester_type, ar.ai_agent_id,
+		        COALESCE(ar.requester_user_id, '') AS requester_user_id, ar.requester_type, ar.ai_agent_id,
 		        ar.status, ar.reason, ar.requested_duration_minutes, ar.decided_by, ar.decided_at, ar.expires_at, ar.created_at
 		 FROM access_requests ar
 		 JOIN secrets s ON s.id = ar.secret_id AND s.user_id = $1 AND s.deleted_at IS NULL
@@ -183,7 +207,7 @@ func (s *Service) Approve(ctx context.Context, requestID, approverUserID string)
 		 SET status = 'approved', decided_by = $1, decided_at = NOW(),
 		     expires_at = NOW() + (requested_duration_minutes || ' minutes')::INTERVAL
 		 WHERE id = $2 AND status = 'pending'
-		 RETURNING id, secret_id, requester_user_id, requester_type, ai_agent_id, status, reason,
+		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		           requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		approverUserID, requestID,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
@@ -205,7 +229,7 @@ func (s *Service) Reject(ctx context.Context, requestID, approverUserID, rejecti
 		`UPDATE access_requests
 		 SET status = 'rejected', decided_by = $1, decided_at = NOW(), rejection_reason = $3
 		 WHERE id = $2 AND status = 'pending'
-		 RETURNING id, secret_id, requester_user_id, requester_type, ai_agent_id, status, reason,
+		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		           rejection_reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		approverUserID, requestID, rejectionReason,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
@@ -236,7 +260,7 @@ func (s *Service) IsAssignedApprover(ctx context.Context, requestID, userID stri
 func (s *Service) GetRequestByID(ctx context.Context, requestID string) (*AccessRequest, error) {
 	var req AccessRequest
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, secret_id, requester_user_id, requester_type, ai_agent_id, status, reason,
+		`SELECT id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		        rejection_reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at
 		 FROM access_requests WHERE id = $1`,
 		requestID,

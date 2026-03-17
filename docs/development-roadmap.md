@@ -91,6 +91,16 @@
 - [x] mcp-server: get_credential returns value; check_approval_status uses single-request endpoint
 - [x] Dashboard: Credential type aligned to Go JSON tags; AccessRequest field names fixed; approval table duration and secret name display fixed
 
+### P0 Gap: Agent Cross-User Access Request [DONE - 2026-03-18]
+- [x] `dualAuthMiddleware` wired in `main.go`; workflow routes accept both user JWT and agent token
+- [x] `WithUserID` / `WithAgentID` context setters added to auth/agent middleware
+- [x] `vault/service.go`: `Secret.ProjectID` field added; `GetSecretByID` selects `project_id`
+- [x] `workflow/handler.go`: project-scope guard (`agent.project_id == secret.project_id`); dual-auth in `CreateRequest`, `GetCredential`, `RevokeCredential`, `GetRequest`
+- [x] `workflow/service.go`: dual-path rate limit; COALESCE scan on list query
+- [x] Migration `000025`: `requester_user_id` made nullable (supports agent-only requests)
+- [x] `mcp-server/src/client.rs`: `create_access_request` sends `requester_type: "ai_agent"`
+- [x] 30 new tests pass
+
 ## Phase 2: Product-Market Fit [Future]
 - Zalo/Slack notifications
 - VSCode extension
