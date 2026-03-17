@@ -32,7 +32,15 @@ fn verify_token(headers: &HeaderMap) -> bool {
     };
 
     let provided = auth.strip_prefix("Bearer ").unwrap_or("").trim();
-    provided == expected
+
+    // Constant-time comparison to prevent timing side-channel attacks
+    let a = provided.as_bytes();
+    let b = expected.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let diff: u8 = a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    diff == 0
 }
 
 /// POST /mcp — handle JSON-RPC request/response
@@ -64,17 +72,13 @@ type SseStream = std::pin::Pin<
 
 /// GET /mcp/sse — Server-Sent Events stream
 /// Sends a "connected" event on connect, then keep-alive pings every 30s.
+/// Returns HTTP 401 (not 200) on auth failure.
 pub async fn handle_mcp_sse(
     State(_state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Sse<SseStream> {
+) -> Response {
     if !verify_token(&headers) {
-        let stream: SseStream = Box::pin(tokio_stream::once(async {
-            Ok::<Event, std::convert::Infallible>(
-                Event::default().event("error").data("Unauthorized"),
-            )
-        }));
-        return Sse::new(stream);
+        return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
     }
 
     let interval = tokio::time::interval(Duration::from_secs(30));
@@ -91,7 +95,7 @@ pub async fn handle_mcp_sse(
             }),
     );
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
 pub async fn run_http_server(port: u16, client: ValtClient) -> anyhow::Result<()> {
