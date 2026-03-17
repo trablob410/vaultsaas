@@ -46,12 +46,13 @@ const ALLOWED_EXTENSIONS: &[&str] = &[
 ];
 
 pub fn redact_value(s: &str) -> String {
-    let len = s.len();
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
     if len <= 8 {
-        return "****".to_string();
+        return "*".repeat(len);
     }
-    let prefix = &s[..4];
-    let suffix = &s[len - 4..];
+    let prefix: String = chars[..4].iter().collect();
+    let suffix: String = chars[len - 4..].iter().collect();
     format!("{prefix}****{suffix}")
 }
 
@@ -164,7 +165,8 @@ mod tests {
 
     #[test]
     fn test_redact_short() {
-        assert_eq!(redact_value("abc"), "****");
+        assert_eq!(redact_value("abc"), "***");
+        assert_eq!(redact_value("12345678"), "********");
     }
 
     #[test]

@@ -48,7 +48,7 @@ export default function ScansPage() {
           className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90"
         >
           <ScanLine className="w-4 h-4" />
-          New Scan
+          How to Scan
         </button>
       </div>
 
@@ -56,7 +56,7 @@ export default function ScansPage() {
         <div className="flex gap-3 p-4 rounded-lg border bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800 text-sm">
           <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
           <div className="space-y-1 text-blue-800 dark:text-blue-200">
-            <p className="font-medium">Scanning runs via the Valt MCP tool</p>
+            <p className="font-medium">How to Scan using the Valt MCP tool</p>
             <p>In your AI agent (Claude, Cursor, etc.), use the <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">scan_secrets</code> tool:</p>
             <code className="block bg-blue-100 dark:bg-blue-900 px-2 py-1 rounded mt-1 font-mono text-xs">
               {'scan_secrets({ path: "/path/to/project", recursive: true })'}

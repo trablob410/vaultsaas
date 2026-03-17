@@ -6,6 +6,7 @@ mod keychain;
 mod protocol;
 mod resources;
 mod scanner;
+mod scanner_tools;
 mod tools;
 
 use serde_json::{json, Value};

@@ -133,10 +133,18 @@ impl ValtClient {
         })).await
     }
 
-    pub async fn create_scan_result(&self, project_id: &str, scan_path: &str, findings_count: usize) -> Result<Value> {
+    pub async fn create_scan_result(&self, project_id: &str, scan_path: &str, findings: &[crate::scanner::ScanFinding]) -> Result<Value> {
+        let findings_json: Vec<serde_json::Value> = findings.iter().map(|f| serde_json::json!({
+            "file_path": f.file_path,
+            "line_number": f.line_number,
+            "pattern_name": f.pattern_name,
+            "credential_type": f.credential_type,
+            "redacted_preview": f.redacted_preview
+        })).collect();
         self.post(&format!("/projects/{project_id}/scans"), serde_json::json!({
             "scan_path": scan_path,
-            "findings_count": findings_count
+            "findings_count": findings.len(),
+            "findings": findings_json
         })).await
     }
 }

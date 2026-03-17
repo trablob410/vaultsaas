@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -133,18 +134,30 @@ func (s *Service) ListFindings(ctx context.Context, scanID string) ([]ScanFindin
 
 // ImportFinding marks a finding as imported and records the secret ID.
 func (s *Service) ImportFinding(ctx context.Context, findingID, secretID string) error {
-	_, err := s.db.Exec(ctx,
+	ct, err := s.db.Exec(ctx,
 		`UPDATE scan_findings SET status = 'imported', imported_secret_id = $1 WHERE id = $2`,
 		secretID, findingID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("finding not found")
+	}
+	return nil
 }
 
 // DismissFinding marks a finding as dismissed.
 func (s *Service) DismissFinding(ctx context.Context, findingID string) error {
-	_, err := s.db.Exec(ctx,
+	ct, err := s.db.Exec(ctx,
 		`UPDATE scan_findings SET status = 'dismissed' WHERE id = $1`,
 		findingID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("finding not found")
+	}
+	return nil
 }

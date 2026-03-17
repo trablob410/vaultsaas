@@ -66,6 +66,7 @@ func (h *Handler) createScan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listScans(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
+	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
 
 	scans, err := h.service.ListScans(r.Context(), projectID)
 	if err != nil {
@@ -83,6 +84,7 @@ func (h *Handler) listScans(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listFindings(w http.ResponseWriter, r *http.Request) {
 	scanID := chi.URLParam(r, "scan_id")
+	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
 
 	findings, err := h.service.ListFindings(r.Context(), scanID)
 	if err != nil {
@@ -104,6 +106,7 @@ type importFindingRequest struct {
 
 func (h *Handler) importFinding(w http.ResponseWriter, r *http.Request) {
 	findingID := chi.URLParam(r, "finding_id")
+	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
 
 	var req importFindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -127,6 +130,7 @@ func (h *Handler) importFinding(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) dismissFinding(w http.ResponseWriter, r *http.Request) {
 	findingID := chi.URLParam(r, "finding_id")
+	_ = auth.UserIDFromContext(r.Context()) // TODO(Phase13): add RBAC authorization
 
 	if err := h.service.DismissFinding(r.Context(), findingID); err != nil {
 		log.Printf("Failed to dismiss finding: %v", err)
