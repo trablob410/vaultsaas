@@ -142,6 +142,28 @@ export interface ScanResult {
   created_at: string
 }
 
+export interface DynamicProvider {
+  id: string
+  project_id: string
+  name: string
+  provider_type: string
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DynamicLease {
+  id: string
+  provider_id: string
+  agent_id?: string
+  credentials?: Record<string, string> // only on creation
+  ttl_seconds: number
+  expires_at: string
+  revoked_at?: string
+  created_at: string
+}
+
 export interface ScanFinding {
   id: string
   scan_id: string

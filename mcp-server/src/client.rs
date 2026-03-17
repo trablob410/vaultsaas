@@ -133,6 +133,16 @@ impl ValtClient {
         })).await
     }
 
+    pub async fn create_dynamic_lease(&self, provider_id: &str, ttl_seconds: u32, agent_id: &str) -> Result<Value> {
+        self.post(
+            &format!("/providers/{provider_id}/leases"),
+            serde_json::json!({
+                "ttl_seconds": ttl_seconds,
+                "agent_id": agent_id
+            }),
+        ).await
+    }
+
     pub async fn create_scan_result(&self, project_id: &str, scan_path: &str, findings: &[crate::scanner::ScanFinding]) -> Result<Value> {
         let findings_json: Vec<serde_json::Value> = findings.iter().map(|f| serde_json::json!({
             "file_path": f.file_path,

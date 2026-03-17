@@ -102,6 +102,19 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "required": ["name", "credential_type", "value"]
             }),
         },
+        ToolDef {
+            name: "request_dynamic_secret".into(),
+            description: "Request a temporary credential from a dynamic secret provider (e.g., temporary Postgres role). Returns credentials that auto-expire.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "UUID of the dynamic provider"},
+                    "ttl_seconds": {"type": "integer", "description": "TTL for the credential (60-3600)", "default": 300},
+                    "agent_id": {"type": "string", "description": "Agent identity ID for attribution"}
+                },
+                "required": ["provider_id"]
+            }),
+        },
     ]
 }
 
@@ -115,8 +128,23 @@ pub async fn call_tool(name: &str, args: &Value, client: &ValtClient) -> Result<
         "authenticate_agent" => tool_authenticate_agent(args).await,
         "scan_secrets" => scanner_tools::tool_scan_secrets(args, client).await,
         "store_secret" => scanner_tools::tool_store_secret(args, client).await,
+        "request_dynamic_secret" => tool_request_dynamic_secret(args, client).await,
         _ => Err(crate::error::ValtError::Protocol(format!("Unknown tool: {name}"))),
     }
+}
+
+async fn tool_request_dynamic_secret(args: &Value, client: &ValtClient) -> Result<Value> {
+    let provider_id = args["provider_id"].as_str()
+        .ok_or_else(|| crate::error::ValtError::Protocol("provider_id required".into()))?;
+    let ttl = args.get("ttl_seconds").and_then(|v| v.as_u64()).unwrap_or(300) as u32;
+    let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+    let result = client.create_dynamic_lease(provider_id, ttl, agent_id).await?;
+    Ok(json!({
+        "lease_id": result.get("id"),
+        "credentials": result.get("credentials"),
+        "expires_at": result.get("expires_at"),
+        "message": "Temporary credentials issued. They will auto-expire."
+    }))
 }
 
 async fn tool_request_access(args: &Value, client: &ValtClient) -> Result<Value> {

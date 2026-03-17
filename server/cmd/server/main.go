@@ -22,6 +22,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/config"
 	"github.com/valt-dev/valt/server/internal/consent"
 	"github.com/valt-dev/valt/server/internal/database"
+	"github.com/valt-dev/valt/server/internal/dynsecret"
 	custommiddleware "github.com/valt-dev/valt/server/internal/middleware"
 	"github.com/valt-dev/valt/server/internal/notify"
 	"github.com/valt-dev/valt/server/internal/org"
@@ -105,6 +106,9 @@ func main() {
 	agentHandler := agent.NewHandler(agentSvc)
 	scannerSvc := scanner.NewService(pool)
 	scannerHandler := scanner.NewHandler(scannerSvc)
+	dynSvc := dynsecret.NewService(pool)
+	dynSvc.StartExpiryWorker(ctx)
+	dynHandler := dynsecret.NewHandler(dynSvc)
 
 	// Rate limiters
 	loginLimiter := custommiddleware.NewRateLimiter(5, 1*time.Minute)
@@ -154,6 +158,7 @@ func main() {
 			r.Mount("/", projectHandler.Routes())
 			r.Mount("/", agentHandler.Routes())
 			r.Mount("/", scannerHandler.Routes())
+			r.Mount("/", dynHandler.Routes())
 		})
 	})
 
