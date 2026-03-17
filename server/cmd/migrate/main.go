@@ -1,0 +1,57 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"strings"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+
+	"github.com/valt-dev/valt/server/internal/database"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: valt-migrate <up|down>")
+		os.Exit(1)
+	}
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+
+	// golang-migrate pgx/v5 driver expects "pgx5://" scheme
+	dbURL = strings.Replace(dbURL, "postgres://", "pgx5://", 1)
+
+	source, err := iofs.New(database.MigrationsFS, "migrations")
+	if err != nil {
+		log.Fatalf("Failed to create migration source: %v", err)
+	}
+
+	m, err := migrate.NewWithSourceInstance("iofs", source, dbURL)
+	if err != nil {
+		log.Fatalf("Failed to create migrate instance: %v", err)
+	}
+	defer m.Close()
+
+	cmd := os.Args[1]
+	switch cmd {
+	case "up":
+		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+			log.Fatalf("Migration up failed: %v", err)
+		}
+		log.Println("Migrations applied successfully")
+	case "down":
+		if err := m.Steps(-1); err != nil && err != migrate.ErrNoChange {
+			log.Fatalf("Migration down failed: %v", err)
+		}
+		log.Println("Rolled back one migration")
+	default:
+		fmt.Printf("Unknown command: %s\nUsage: valt-migrate <up|down>\n", cmd)
+		os.Exit(1)
+	}
+}

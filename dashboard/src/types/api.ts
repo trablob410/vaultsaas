@@ -1,0 +1,133 @@
+export interface Secret {
+  id: string
+  name: string
+  description: string
+  credential_type: string
+  source: string
+  status: string
+  owner_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AccessRequest {
+  id: string
+  secret_id: string
+  requester_id: string
+  reason: string
+  duration_minutes: number
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'revoked'
+  policy_tier: number
+  created_at: string
+  updated_at: string
+  approved_at?: string
+  expires_at?: string
+  rejected_at?: string
+  rejection_reason?: string
+}
+
+export interface Credential {
+  id: string
+  request_id: string
+  credential_data: string
+  issued_at: string
+  expires_at: string
+  revoked_at?: string
+  status: string
+}
+
+export interface AuditLog {
+  id: string
+  user_id: string
+  action: string
+  resource_type: string
+  resource_id: string
+  details: Record<string, unknown>
+  ip_address: string
+  created_at: string
+}
+
+export interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface User {
+  id: string
+  email: string
+  display_name?: string
+  avatar_url?: string
+  region_code: string
+  auth_provider: string
+}
+
+export interface Organization {
+  id: string
+  name: string
+  slug: string
+  owner_id: string
+  plan: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Workspace {
+  id: string
+  org_id: string
+  name: string
+  slug: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Project {
+  id: string
+  workspace_id: string
+  name: string
+  slug: string
+  created_at: string
+  updated_at: string
+}
+
+export interface OrgMembership {
+  org_id: string
+  user_id: string
+  role: string
+  created_at: string
+}
+
+export interface ProjectMembership {
+  project_id: string
+  user_id: string
+  role: string
+  permissions: Record<string, unknown>
+  created_at: string
+}
+
+export interface AgentIdentity {
+  id: string
+  project_id: string
+  name: string
+  description: string
+  agent_type: string
+  auth_method: string
+  allowed_scopes: string[]
+  max_session_ttl: number
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentToken {
+  id: string
+  agent_id: string
+  scopes: string[]
+  expires_at: string | null
+  last_used_at: string | null
+  created_at: string
+  revoked_at: string | null
+  token?: string  // only present on creation
+}

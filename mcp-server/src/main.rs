@@ -1,99 +1,126 @@
+mod config;
+mod client;
+mod crypto;
+mod error;
+mod keychain;
+mod protocol;
+mod resources;
+mod tools;
+
 use serde_json::{json, Value};
-use std::io::{self, BufRead, Write};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::info;
 
-fn main() {
+use client::ValtClient;
+use protocol::{JsonRpcRequest, error_response, success_response};
+
+#[tokio::main]
+async fn main() {
     tracing_subscriber::fmt()
-        .with_writer(io::stderr)
+        .with_writer(std::io::stderr)
         .with_env_filter("valt_mcp_server=info")
         .init();
 
     info!("Valt MCP Server v0.1.0 starting (stdio mode)");
 
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut stdout = stdout.lock();
+    let cfg = match config::load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to load config: {e}");
+            std::process::exit(1);
+        }
+    };
 
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(l) => l,
+    let token = client::get_auth_token().unwrap_or_default();
+    let client = ValtClient::new(cfg.api_url.clone(), token)
+        .expect("Failed to build HTTP client");
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let mut reader = BufReader::new(stdin);
+    let mut writer = tokio::io::BufWriter::new(stdout);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
             Err(e) => {
                 eprintln!("Read error: {e}");
                 break;
             }
-        };
+        }
 
-        if line.trim().is_empty() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
 
-        let request: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(e) => {
-                let error_response = json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": {
-                        "code": -32700,
-                        "message": format!("Parse error: {e}")
-                    }
-                });
-                let _ = writeln!(stdout, "{}", error_response);
-                let _ = stdout.flush();
-                continue;
-            }
-        };
-
-        let response = handle_request(&request);
-        let _ = writeln!(stdout, "{}", response);
-        let _ = stdout.flush();
+        let response = handle_request(trimmed, &client).await;
+        // Skip writing for notifications (null response)
+        if response.is_null() {
+            continue;
+        }
+        let mut out = serde_json::to_string(&response).unwrap_or_else(|_| {
+            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"serialize error"}}"#.to_string()
+        });
+        out.push('\n');
+        let _ = writer.write_all(out.as_bytes()).await;
+        let _ = writer.flush().await;
     }
 }
 
-fn handle_request(request: &Value) -> Value {
-    let id = request.get("id").cloned().unwrap_or(Value::Null);
-    let method = request
-        .get("method")
-        .and_then(|m| m.as_str())
-        .unwrap_or("");
+async fn handle_request(raw: &str, client: &ValtClient) -> Value {
+    let req: JsonRpcRequest = match serde_json::from_str(raw) {
+        Ok(r) => r,
+        Err(e) => {
+            let resp = error_response(None, -32700, format!("Parse error: {e}"));
+            return serde_json::to_value(resp).unwrap_or(Value::Null);
+        }
+    };
 
-    match method {
-        "initialize" => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": { "listChanged": false },
-                    "resources": { "subscribe": false, "listChanged": false }
-                },
-                "serverInfo": {
-                    "name": "valt-mcp-server",
-                    "version": "0.1.0"
-                }
+    let id = req.id.clone();
+    let resp = match req.method.as_str() {
+        "initialize" => success_response(id, json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {
+                "tools": { "listChanged": false },
+                "resources": { "subscribe": false, "listChanged": false }
+            },
+            "serverInfo": { "name": "valt-mcp-server", "version": "0.1.0" }
+        })),
+        "notifications/initialized" => {
+            // No response for notifications
+            return Value::Null;
+        }
+        "tools/list" => success_response(id, json!({
+            "tools": tools::list_tools()
+        })),
+        "tools/call" => {
+            let params = req.params.as_ref().unwrap_or(&Value::Null);
+            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let args = params.get("arguments").unwrap_or(&Value::Null);
+            match tools::call_tool(name, args, client).await {
+                Ok(result) => success_response(req.id, json!({
+                    "content": [{ "type": "text", "text": result.to_string() }]
+                })),
+                Err(e) => error_response(req.id, -32603, e.to_string()),
             }
-        }),
-        "tools/list" => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "tools": []
+        }
+        "resources/list" => success_response(id, json!({
+            "resources": resources::list_resources()
+        })),
+        "resources/read" => {
+            let params = req.params.as_ref().unwrap_or(&Value::Null);
+            let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+            match resources::read_resource(uri, client).await {
+                Ok(result) => success_response(req.id, result),
+                Err(e) => error_response(req.id, -32603, e.to_string()),
             }
-        }),
-        "resources/list" => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "resources": []
-            }
-        }),
-        _ => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": -32601,
-                "message": format!("Method not found: {method}")
-            }
-        }),
-    }
+        }
+        method => error_response(id, -32601, format!("Method not found: {method}")),
+    };
+
+    serde_json::to_value(resp).unwrap_or(Value::Null)
 }
