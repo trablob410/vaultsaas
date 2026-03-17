@@ -29,6 +29,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/project"
 	"github.com/valt-dev/valt/server/internal/ratelimit"
 	"github.com/valt-dev/valt/server/internal/scanner"
+	"github.com/valt-dev/valt/server/internal/usage"
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/internal/workflow"
 	"github.com/valt-dev/valt/server/internal/workspace"
@@ -124,6 +125,10 @@ func main() {
 	}
 	_ = agentRateLimiter // available for use in handlers
 
+	// Usage tracking
+	usageTracker := usage.NewTracker(pool)
+	usageHandler := usage.NewHandler(usageTracker)
+
 	// Rate limiters
 	loginLimiter := custommiddleware.NewRateLimiter(5, 1*time.Minute)
 	apiLimiter := custommiddleware.NewRateLimiter(100, 1*time.Minute)
@@ -173,6 +178,7 @@ func main() {
 			r.Mount("/", agentHandler.Routes())
 			r.Mount("/", scannerHandler.Routes())
 			r.Mount("/", dynHandler.Routes())
+			r.Mount("/", usageHandler.Routes())
 		})
 	})
 
