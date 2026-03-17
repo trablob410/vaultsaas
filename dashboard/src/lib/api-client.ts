@@ -10,6 +10,10 @@ import type {
   ProjectMembership,
   AgentIdentity,
   AgentToken,
+  ScanResult,
+  ScanFinding,
+  DynamicProvider,
+  DynamicLease,
 } from '@/types/api'
 
 const BASE = '/api/proxy'
@@ -113,5 +117,30 @@ export const api = {
       apiFetch<void>(`/agents/${agentId}/tokens/${tokenId}`, { method: 'DELETE' }),
     listTokens: (agentId: string) =>
       apiFetch<{ tokens: AgentToken[] }>(`/agents/${agentId}/tokens`),
+  },
+  providers: {
+    list: (projectId: string) =>
+      apiFetch<{ providers: DynamicProvider[] }>(`/projects/${projectId}/providers`),
+    create: (projectId: string, body: { name: string; provider_type: string; config: Record<string, string> }) =>
+      apiFetch<DynamicProvider>(`/projects/${projectId}/providers`, { method: 'POST', body: JSON.stringify(body) }),
+    createLease: (providerId: string, body: { agent_id?: string; ttl_seconds: number }) =>
+      apiFetch<DynamicLease>(`/providers/${providerId}/leases`, { method: 'POST', body: JSON.stringify(body) }),
+    revokeLease: (leaseId: string) =>
+      apiFetch<void>(`/leases/${leaseId}`, { method: 'DELETE' }),
+    listLeases: (providerId: string) =>
+      apiFetch<{ leases: DynamicLease[] }>(`/providers/${providerId}/leases`),
+  },
+  scans: {
+    list: (projectId: string) =>
+      apiFetch<{ scans: ScanResult[] }>(`/projects/${projectId}/scans`),
+    getFindings: (scanId: string) =>
+      apiFetch<{ findings: ScanFinding[] }>(`/scans/${scanId}/findings`),
+    importFinding: (scanId: string, findingId: string, secretId: string) =>
+      apiFetch<void>(`/scans/${scanId}/findings/${findingId}/import`, {
+        method: 'POST',
+        body: JSON.stringify({ secret_id: secretId }),
+      }),
+    dismissFinding: (scanId: string, findingId: string) =>
+      apiFetch<void>(`/scans/${scanId}/findings/${findingId}/dismiss`, { method: 'POST' }),
   },
 }

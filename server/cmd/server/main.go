@@ -22,10 +22,14 @@ import (
 	"github.com/valt-dev/valt/server/internal/config"
 	"github.com/valt-dev/valt/server/internal/consent"
 	"github.com/valt-dev/valt/server/internal/database"
+	"github.com/valt-dev/valt/server/internal/dynsecret"
 	custommiddleware "github.com/valt-dev/valt/server/internal/middleware"
 	"github.com/valt-dev/valt/server/internal/notify"
 	"github.com/valt-dev/valt/server/internal/org"
 	"github.com/valt-dev/valt/server/internal/project"
+	"github.com/valt-dev/valt/server/internal/ratelimit"
+	"github.com/valt-dev/valt/server/internal/scanner"
+	"github.com/valt-dev/valt/server/internal/usage"
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/internal/workflow"
 	"github.com/valt-dev/valt/server/internal/workspace"
@@ -108,6 +112,28 @@ func main() {
 	projectHandler := project.NewHandler(projectSvc)
 	agentSvc := agent.NewService(pool)
 	agentHandler := agent.NewHandler(agentSvc)
+	scannerSvc := scanner.NewService(pool)
+	scannerHandler := scanner.NewHandler(scannerSvc)
+	dynSvc := dynsecret.NewService(pool)
+	dynSvc.StartExpiryWorker(ctx)
+	dynHandler := dynsecret.NewHandler(dynSvc)
+
+	// Redis rate limiter (optional — skip if REDIS_URL not set)
+	var agentRateLimiter *ratelimit.RedisLimiter
+	if cfg.RedisURL != "" {
+		rl, err := ratelimit.NewRedisLimiter(cfg.RedisURL)
+		if err != nil {
+			log.Printf("Warning: Redis rate limiter init failed: %v", err)
+		} else {
+			agentRateLimiter = rl
+			defer agentRateLimiter.Close()
+		}
+	}
+	_ = agentRateLimiter // available for use in handlers
+
+	// Usage tracking
+	usageTracker := usage.NewTracker(pool)
+	usageHandler := usage.NewHandler(usageTracker)
 
 	// Rate limiters
 	loginLimiter := custommiddleware.NewRateLimiter(5, 1*time.Minute)
@@ -157,6 +183,9 @@ func main() {
 			r.Mount("/orgs/{org_id}/workspaces", workspaceHandler.Routes())
 			r.Mount("/", projectHandler.Routes())
 			r.Mount("/", agentHandler.Routes())
+			r.Mount("/", scannerHandler.Routes())
+			r.Mount("/", dynHandler.Routes())
+			r.Mount("/", usageHandler.Routes())
 		})
 	})
 

@@ -1,18 +1,35 @@
 mod config;
 mod client;
 mod crypto;
+mod dynsecret_tools;
 mod error;
+mod http;
 mod keychain;
 mod protocol;
 mod resources;
+mod scanner;
+mod scanner_tools;
 mod tools;
 
+use clap::Parser;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::info;
 
 use client::ValtClient;
 use protocol::{JsonRpcRequest, error_response, success_response};
+
+#[derive(Parser)]
+#[command(name = "valt-mcp-server", version = "0.1.0")]
+struct Args {
+    /// Transport mode: stdio (default) or http
+    #[arg(long, default_value = "stdio")]
+    transport: String,
+
+    /// Port for HTTP transport (default: 3737)
+    #[arg(long, default_value = "3737")]
+    port: u16,
+}
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +38,7 @@ async fn main() {
         .with_env_filter("valt_mcp_server=info")
         .init();
 
-    info!("Valt MCP Server v0.1.0 starting (stdio mode)");
+    let args = Args::parse();
 
     let cfg = match config::load_config() {
         Ok(c) => c,
@@ -35,6 +52,22 @@ async fn main() {
     let client = ValtClient::new(cfg.api_url.clone(), token)
         .expect("Failed to build HTTP client");
 
+    match args.transport.as_str() {
+        "http" => {
+            info!("Valt MCP Server v0.1.0 starting (http mode, port {})", args.port);
+            if let Err(e) = http::run_http_server(args.port, client).await {
+                eprintln!("HTTP server error: {e}");
+                std::process::exit(1);
+            }
+        }
+        _ => {
+            info!("Valt MCP Server v0.1.0 starting (stdio mode)");
+            run_stdio_loop(client).await;
+        }
+    }
+}
+
+async fn run_stdio_loop(client: ValtClient) {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin);
@@ -71,7 +104,7 @@ async fn main() {
     }
 }
 
-async fn handle_request(raw: &str, client: &ValtClient) -> Value {
+pub async fn handle_request(raw: &str, client: &ValtClient) -> Value {
     let req: JsonRpcRequest = match serde_json::from_str(raw) {
         Ok(r) => r,
         Err(e) => {

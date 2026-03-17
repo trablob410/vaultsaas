@@ -128,4 +128,38 @@ impl ValtClient {
         };
         self.get(&path).await
     }
+
+    pub async fn create_secret(&self, name: &str, credential_type: &str, value: &str, source: &str) -> Result<Value> {
+        self.post("/secrets", serde_json::json!({
+            "name": name,
+            "credential_type": credential_type,
+            "value": value,
+            "source": source
+        })).await
+    }
+
+    pub async fn create_dynamic_lease(&self, provider_id: &str, ttl_seconds: u32, agent_id: &str) -> Result<Value> {
+        self.post(
+            &format!("/providers/{provider_id}/leases"),
+            serde_json::json!({
+                "ttl_seconds": ttl_seconds,
+                "agent_id": agent_id
+            }),
+        ).await
+    }
+
+    pub async fn create_scan_result(&self, project_id: &str, scan_path: &str, findings: &[crate::scanner::ScanFinding]) -> Result<Value> {
+        let findings_json: Vec<serde_json::Value> = findings.iter().map(|f| serde_json::json!({
+            "file_path": f.file_path,
+            "line_number": f.line_number,
+            "pattern_name": f.pattern_name,
+            "credential_type": f.credential_type,
+            "redacted_preview": f.redacted_preview
+        })).collect();
+        self.post(&format!("/projects/{project_id}/scans"), serde_json::json!({
+            "scan_path": scan_path,
+            "findings_count": findings.len(),
+            "findings": findings_json
+        })).await
+    }
 }

@@ -3,6 +3,8 @@ use crate::client::ValtClient;
 use crate::error::Result;
 use crate::keychain;
 use crate::protocol::ToolDef;
+use crate::scanner_tools;
+use crate::dynsecret_tools;
 
 pub fn list_tools() -> Vec<ToolDef> {
     vec![
@@ -74,6 +76,46 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "required": ["token"]
             }),
         },
+        ToolDef {
+            name: "scan_secrets".into(),
+            description: "Scan a directory for hardcoded secrets and credentials. Returns redacted findings - never exposes raw values.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory path to scan"},
+                    "recursive": {"type": "boolean", "description": "Scan subdirectories", "default": true},
+                    "project_id": {"type": "string", "description": "Project ID to persist scan result (optional)"}
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDef {
+            name: "store_secret".into(),
+            description: "Store a secret in the Valt vault. Use after scanning to import found credentials.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Human-readable name for the secret"},
+                    "credential_type": {"type": "string", "description": "Type of credential (e.g. api_key, database_uri, ssh_key)"},
+                    "value": {"type": "string", "description": "The secret value to store (will be encrypted)"},
+                    "source": {"type": "string", "description": "Where the secret came from (e.g. scanner, manual)"}
+                },
+                "required": ["name", "credential_type", "value"]
+            }),
+        },
+        ToolDef {
+            name: "request_dynamic_secret".into(),
+            description: "Request a temporary credential from a dynamic secret provider (e.g., temporary Postgres role). Returns credentials that auto-expire.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "UUID of the dynamic provider"},
+                    "ttl_seconds": {"type": "integer", "description": "TTL for the credential (60-3600)", "default": 300},
+                    "agent_id": {"type": "string", "description": "Agent identity ID for attribution"}
+                },
+                "required": ["provider_id"]
+            }),
+        },
     ]
 }
 
@@ -85,6 +127,9 @@ pub async fn call_tool(name: &str, args: &Value, client: &ValtClient) -> Result<
         "revoke_credential" => tool_revoke_credential(args, client).await,
         "list_my_secrets" => tool_list_secrets(args, client).await,
         "authenticate_agent" => tool_authenticate_agent(args).await,
+        "scan_secrets" => scanner_tools::tool_scan_secrets(args, client).await,
+        "store_secret" => scanner_tools::tool_store_secret(args, client).await,
+        "request_dynamic_secret" => dynsecret_tools::tool_request_dynamic_secret(args, client).await,
         _ => Err(crate::error::ValtError::Protocol(format!("Unknown tool: {name}"))),
     }
 }
@@ -181,39 +226,5 @@ async fn tool_list_secrets(args: &Value, client: &ValtClient) -> Result<Value> {
     Ok(json!({"secrets": [], "count": 0}))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_list_tools_returns_six() {
-        let tools = list_tools();
-        assert_eq!(tools.len(), 6);
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        assert!(names.contains(&"request_secret_access"));
-        assert!(names.contains(&"list_my_secrets"));
-        assert!(names.contains(&"authenticate_agent"));
-    }
-
-    #[test]
-    fn test_tool_schemas_have_required_fields() {
-        for tool in list_tools() {
-            assert!(!tool.name.is_empty());
-            assert!(!tool.description.is_empty());
-            assert_eq!(tool.input_schema.get("type").and_then(|v| v.as_str()), Some("object"));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_call_unknown_tool_errors() {
-        use crate::config::ValtConfig;
-        let config = ValtConfig::default();
-        let result = crate::client::ValtClient::new(config.api_url, "test_token".into());
-        if let Ok(client) = result {
-            let err = call_tool("nonexistent_tool", &json!({}), &client).await;
-            assert!(err.is_err());
-            let msg = err.unwrap_err().to_string();
-            assert!(msg.contains("Unknown tool"));
-        }
-    }
-}
+// Tests live in scanner_tools.rs to keep this file under 200 lines.

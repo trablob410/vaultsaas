@@ -1,0 +1,56 @@
+package ratelimit
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// RedisLimiter implements sliding window rate limiting using Redis.
+type RedisLimiter struct {
+	client *redis.Client
+}
+
+// NewRedisLimiter creates a new Redis-backed rate limiter.
+func NewRedisLimiter(redisURL string) (*RedisLimiter, error) {
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	client := redis.NewClient(opt)
+	return &RedisLimiter{client: client}, nil
+}
+
+// Allow checks if agentID is within the rpm (requests per minute) limit.
+// Returns true if the request is allowed, false if rate limited.
+// Uses Redis sliding window: ZADD + ZREMRANGEBYSCORE + ZCARD.
+func (l *RedisLimiter) Allow(ctx context.Context, agentID string, rpm int) (bool, error) {
+	if rpm <= 0 {
+		return true, nil
+	}
+	key := fmt.Sprintf("ratelimit:agent:%s", agentID)
+	now := time.Now().UnixMilli()
+	windowStart := now - 60_000 // 60 seconds ago in ms
+
+	pipe := l.client.Pipeline()
+	pipe.ZRemRangeByScore(ctx, key, "-inf", fmt.Sprintf("%d", windowStart))
+	pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: now})
+	pipe.ZCard(ctx, key)
+	pipe.Expire(ctx, key, 65*time.Second)
+
+	cmds, err := pipe.Exec(ctx)
+	if err != nil {
+		// Redis failure — allow request (fail open)
+		return true, fmt.Errorf("redis error: %w", err)
+	}
+
+	count := cmds[2].(*redis.IntCmd).Val()
+	return count <= int64(rpm), nil
+}
+
+// Close closes the Redis connection.
+func (l *RedisLimiter) Close() error {
+	return l.client.Close()
+}

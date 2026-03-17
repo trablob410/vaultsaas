@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown } from 'lucide-react'
+import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown, ScanLine, Database, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -10,6 +10,8 @@ const navItems = [
   { href: '/approvals', label: 'Approvals', icon: ClipboardCheck },
   { href: '/audit', label: 'Audit', icon: ScrollText },
   { href: '/agents', label: 'Agents', icon: Bot },
+  { href: '/scans', label: 'Scanner', icon: ScanLine },
+  { href: '/providers', label: 'Providers', icon: Database },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
@@ -60,7 +62,14 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="p-3 border-t">
+      <div className="p-3 border-t space-y-1">
+        <Link
+          href="/settings/upgrade"
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          <Zap className="w-4 h-4 shrink-0" />
+          Upgrade
+        </Link>
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-full"

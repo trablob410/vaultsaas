@@ -48,6 +48,9 @@ type Config struct {
 	// VaultMasterKey is a base64-encoded 32-byte AES-256 key used to wrap DEKs.
 	// If not set, an ephemeral key is generated (secrets won't survive restart).
 	VaultMasterKey string `envconfig:"VAULT_MASTER_KEY" default:""`
+
+	// Redis (optional — empty disables Redis-backed features)
+	RedisURL string `envconfig:"REDIS_URL" default:""`
 }
 
 // MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.
