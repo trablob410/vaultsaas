@@ -42,9 +42,11 @@ export interface AuditLog {
   action: string
   resource_type: string
   resource_id: string
-  details: Record<string, unknown>
+  event_time: string
+  event_type: string
+  status: string
   ip_address: string
-  created_at: string
+  metadata: string
 }
 
 export interface PaginatedResponse<T> {

@@ -63,7 +63,7 @@ export default function AuditTable() {
               ) : logs.map((log) => (
                 <TableRow key={log.id}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    {formatDate(log.created_at)}
+                    {formatDate(log.event_time)}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="font-mono text-xs">{log.action}</Badge>
