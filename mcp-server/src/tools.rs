@@ -81,8 +81,9 @@ pub fn list_tools() -> Vec<ToolDef> {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Directory or file path to scan"},
-                    "recursive": {"type": "boolean", "description": "Recursively scan subdirectories (default: true)", "default": true}
+                    "path": {"type": "string", "description": "Directory path to scan"},
+                    "recursive": {"type": "boolean", "description": "Scan subdirectories", "default": true},
+                    "project_id": {"type": "string", "description": "Project ID to persist scan result (optional)"}
                 },
                 "required": ["path"]
             }),
@@ -112,7 +113,7 @@ pub async fn call_tool(name: &str, args: &Value, client: &ValtClient) -> Result<
         "revoke_credential" => tool_revoke_credential(args, client).await,
         "list_my_secrets" => tool_list_secrets(args, client).await,
         "authenticate_agent" => tool_authenticate_agent(args).await,
-        "scan_secrets" => tool_scan_secrets(args),
+        "scan_secrets" => tool_scan_secrets(args, client).await,
         "store_secret" => tool_store_secret(args, client).await,
         _ => Err(crate::error::ValtError::Protocol(format!("Unknown tool: {name}"))),
     }
@@ -203,7 +204,7 @@ async fn tool_list_secrets(args: &Value, client: &ValtClient) -> Result<Value> {
     Ok(json!({"secrets": [], "count": 0}))
 }
 
-fn tool_scan_secrets(args: &Value) -> Result<Value> {
+async fn tool_scan_secrets(args: &Value, client: &ValtClient) -> Result<Value> {
     let path = args["path"].as_str()
         .ok_or_else(|| crate::error::ValtError::Protocol("path required".into()))?;
     let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(true);
@@ -216,6 +217,11 @@ fn tool_scan_secrets(args: &Value) -> Result<Value> {
         "credential_type": f.credential_type,
         "redacted_preview": f.redacted_preview,
     })).collect();
+    // If project_id provided, persist to backend
+    if let Some(pid) = args.get("project_id").and_then(|v| v.as_str()) {
+        let _ = client.create_scan_result(pid, path, count).await;
+        // Ignore errors (scan result persistence is best-effort)
+    }
     Ok(json!({
         "findings": findings_json,
         "count": count,
