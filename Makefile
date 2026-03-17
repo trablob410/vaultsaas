@@ -1,4 +1,4 @@
-.PHONY: help dev down build test lint migrate-up migrate-down seed clean
+.PHONY: help dev down build test test-unit test-integration test-dashboard test-mcp lint migrate-up migrate-down seed clean security
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -12,24 +12,36 @@ down: ## Stop all services
 build: ## Build all services
 	docker compose build
 
-test: ## Run all tests
-	cd server && go test ./... -v
+test-unit: ## Run Go unit tests (no DB)
+	cd server && go test ./internal/... ./pkg/... -v -count=1
+
+test-integration: ## Run Go integration tests (requires Docker)
+	cd server && go test ./tests/integration/... -v -count=1 -timeout 5m
+
+test-dashboard: ## Run dashboard tests
 	cd dashboard && npm test
+
+test-mcp: ## Run Rust MCP tests
 	cd mcp-server && cargo test
 
-lint: ## Run linters
-	cd server && golangci-lint run
+test: test-unit test-dashboard test-mcp ## Run all tests (unit + dashboard + mcp)
+
+lint: ## Run all linters
+	cd server && golangci-lint run ./...
 	cd dashboard && npm run lint
 	cd mcp-server && cargo clippy -- -D warnings
 
+security: ## Run trivy security scan
+	trivy fs --severity HIGH,CRITICAL .
+
 migrate-up: ## Run database migrations
-	docker compose exec server /usr/local/bin/valt-server migrate up
+	docker compose run --rm server valt-migrate up
 
 migrate-down: ## Rollback last migration
-	docker compose exec server /usr/local/bin/valt-server migrate down
+	docker compose run --rm server valt-migrate down
 
 seed: ## Seed development data
-	docker compose exec server /usr/local/bin/valt-server seed
+	docker compose run --rm server valt-seed
 
 logs: ## Tail all service logs
 	docker compose logs -f
