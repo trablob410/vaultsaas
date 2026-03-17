@@ -1,5 +1,45 @@
 # Project Changelog
 
+## [1.3.0] - 2026-03-17 — Phases 10-15: Scanner, Dynamic Secrets, Gateway, RBAC, CLI, Free Tier
+
+### Added
+
+**Phase 10 — Secret Scanner**
+- `mcp-server/src/scanner.rs` — 17 regex patterns (AWS, GitHub, Stripe, OpenAI, generic high-entropy keys)
+- 2 new MCP tools: `scan_secrets`, `store_secret` (total: 8 tools)
+- `server/internal/scanner/` — scan result + finding CRUD, 5 HTTP endpoints
+- Migration `000018`: `scan_results` + `scan_findings` tables
+- Dashboard `/scans` (list) and `/scans/[id]` (findings detail) pages
+
+**Phase 11 — Dynamic Secrets**
+- `server/internal/dynsecret/` — `Provider` interface, `PostgresProvider` (CREATE ROLE LOGIN ... VALID UNTIL), lease management, auto-expiry background worker
+- Migrations `000019-000020`: `dynamic_providers` + `dynamic_leases` tables
+- New MCP tool: `request_dynamic_secret`
+- Dashboard `/providers` page
+
+**Phase 12 — MCP Gateway (HTTP/SSE)**
+- `mcp-server/src/http.rs` — axum HTTP server, `POST /mcp` and `GET /mcp/sse` (SSE) endpoints, Bearer token auth
+- `--transport stdio|http` and `--port` CLI flags via clap; stdio remains default (backward-compatible)
+
+**Phase 13 — Enhanced RBAC + Policies**
+- `server/internal/rbac/` — role permission matrix (owner/admin/member/viewer), RBAC middleware
+- `server/internal/ratelimit/` — Redis sliding-window per-agent rate limiting (go-redis/v9); optional via `REDIS_URL`
+- `server/internal/workflow/approval-chain.go` — multi-step sequential approval chains
+- Migrations `000021-000022`: `approval_steps` table, `rate_limit_rpm` column on `agent_identities`
+
+**Phase 14 — CLI + SDKs**
+- `server/cmd/valt/` — `valt` CLI (cobra): `login`, `secrets list/create`, `agents list/create`, `scan`, `run`; config at `~/.valt/config.json`
+- `sdk/go/` — Go SDK (stdlib only, module `github.com/valt-dev/valt-go`)
+- `sdk/python/` — Python SDK (urllib only, zero dependencies)
+
+**Phase 15 — Cloud Free Tier**
+- `server/internal/usage/` — usage tracking, free tier enforcement middleware (50 secrets, 3 agents, 1000 req/day)
+- Migration `000023`: `usage_metrics` table
+- `GET /orgs/{id}/usage` endpoint
+- Dashboard `/settings/upgrade` page with `UsageBar` components; Sidebar Upgrade link
+
+---
+
 ## [0.7.0] - 2026-03-17 — Phases 1.5-1.7: Dashboard + MCP Server + Testing
 
 ### Added
