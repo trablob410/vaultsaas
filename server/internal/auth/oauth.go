@@ -37,6 +37,18 @@ func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
+	// If CLI session ID present, persist it in a cookie for the callback.
+	if cliSession := r.URL.Query().Get("cli_session"); cliSession != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "cli_session",
+			Value:    cliSession,
+			Path:     "/",
+			MaxAge:   300,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+
 	redirectURL := h.oauthConfig.AuthCodeURL(state)
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
@@ -87,10 +99,26 @@ func (h *Handler) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	accessToken, err := h.jwtMgr.GenerateAccessToken(userID)
+	if err != nil {
+		log.Printf("oauth: generate access token: %v", err)
+		http.Error(w, "token issuance failed", http.StatusInternalServerError)
+		return
+	}
+
 	if err := h.issueTokensWithCookies(w, r, userID); err != nil {
 		log.Printf("oauth: issue tokens: %v", err)
 		http.Error(w, "token issuance failed", http.StatusInternalServerError)
 		return
+	}
+
+	// If CLI session cookie present, store JWT so the CLI can poll for it.
+	if cliSessionCookie, cookieErr := r.Cookie("cli_session"); cookieErr == nil && cliSessionCookie.Value != "" {
+		_, _ = h.pool.Exec(r.Context(),
+			`UPDATE cli_auth_sessions SET token = $1 WHERE id = $2 AND expires_at > NOW()`,
+			accessToken, cliSessionCookie.Value,
+		)
+		http.SetCookie(w, &http.Cookie{Name: "cli_session", MaxAge: -1, Path: "/"})
 	}
 
 	redirectTarget, _ := url.JoinPath(h.dashboardURL, "/secrets")

@@ -23,10 +23,11 @@ import (
 
 // Handler holds the DB pool and JWT manager for auth endpoints.
 type Handler struct {
-	pool         *pgxpool.Pool
-	jwtMgr       *JWTManager
-	oauthConfig  *oauth2.Config
-	dashboardURL string
+	pool               *pgxpool.Pool
+	jwtMgr             *JWTManager
+	oauthConfig        *oauth2.Config
+	dashboardURL       string
+	cliSessionHandler  *CLISessionHandler
 }
 
 // NewHandler constructs a Handler with required dependencies.
@@ -38,7 +39,14 @@ func NewHandler(pool *pgxpool.Pool, jwtMgr *JWTManager, cfg *config.Config) *Han
 		Scopes:       []string{"openid", "email", "profile"},
 		Endpoint:     google.Endpoint,
 	}
-	return &Handler{pool: pool, jwtMgr: jwtMgr, oauthConfig: oauthCfg, dashboardURL: cfg.DashboardURL}
+	cliHandler := NewCLISessionHandler(pool, cfg.BaseURL)
+	return &Handler{
+		pool:              pool,
+		jwtMgr:            jwtMgr,
+		oauthConfig:       oauthCfg,
+		dashboardURL:      cfg.DashboardURL,
+		cliSessionHandler: cliHandler,
+	}
 }
 
 // Routes returns a chi.Router with all auth routes mounted.
@@ -49,6 +57,10 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/refresh", h.refresh)
 	r.Get("/google", h.googleLogin)
 	r.Get("/google/callback", h.googleCallback)
+	if h.cliSessionHandler != nil {
+		r.Get("/cli-start", h.cliSessionHandler.Start)
+		r.Get("/cli-poll", h.cliSessionHandler.Poll)
+	}
 	return r
 }
 
