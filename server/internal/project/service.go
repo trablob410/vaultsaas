@@ -135,3 +135,31 @@ func (s *Service) ListMembers(ctx context.Context, projectID string) ([]ProjectM
 	}
 	return members, nil
 }
+
+// GetPolicy returns the policy_config JSON for a project.
+func (s *Service) GetPolicy(ctx context.Context, projectID string) ([]byte, error) {
+	var policyJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(policy_config, '{}') FROM projects WHERE id = $1`,
+		projectID,
+	).Scan(&policyJSON)
+	if err != nil {
+		return nil, err
+	}
+	return policyJSON, nil
+}
+
+// SetPolicy saves the policy_config JSON for a project.
+func (s *Service) SetPolicy(ctx context.Context, projectID string, policyJSON []byte) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE projects SET policy_config = $1 WHERE id = $2`,
+		policyJSON, projectID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("project not found")
+	}
+	return nil
+}

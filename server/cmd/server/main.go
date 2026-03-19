@@ -25,6 +25,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/dynsecret"
 	custommiddleware "github.com/valt-dev/valt/server/internal/middleware"
 	"github.com/valt-dev/valt/server/internal/notify"
+	"github.com/valt-dev/valt/server/internal/rbac"
 	"github.com/valt-dev/valt/server/internal/org"
 	"github.com/valt-dev/valt/server/internal/project"
 	"github.com/valt-dev/valt/server/internal/ratelimit"
@@ -203,6 +204,12 @@ func main() {
 				json.NewEncoder(w).Encode(map[string]string{"url": url})
 			})
 			r.Mount("/secrets", vaultHandler.Routes())
+			r.Get("/secrets/{id}/policy", vaultHandler.GetSecretPolicy)
+			r.Put("/secrets/{id}/policy", vaultHandler.PutSecretPolicy)
+			r.With(rbac.Middleware(pool, "project_id", rbac.ResourceProject, rbac.ActionAdmin)).
+				Get("/projects/{project_id}/policy", projectHandler.GetProjectPolicy)
+			r.With(rbac.Middleware(pool, "project_id", rbac.ResourceProject, rbac.ActionAdmin)).
+				Put("/projects/{project_id}/policy", projectHandler.PutProjectPolicy)
 			r.Get("/access-requests", workflowHandler.ListPending)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)
 			r.Post("/access-requests/{request_id}/reject", workflowHandler.Reject)

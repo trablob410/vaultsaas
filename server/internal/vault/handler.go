@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/valt-dev/valt/server/internal/auth"
+	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 	"github.com/valt-dev/valt/server/pkg/crypto"
 	"github.com/valt-dev/valt/server/pkg/validator"
@@ -291,4 +292,47 @@ func (h *Handler) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetSecretPolicy handles GET /secrets/{id}/policy
+func (h *Handler) GetSecretPolicy(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	secretID := chi.URLParam(r, "id")
+	if _, err := validator.ValidateUUID(secretID); err != nil {
+		apierror.BadRequest(w, "invalid secret_id")
+		return
+	}
+	policyJSON, err := h.service.GetPolicy(r.Context(), secretID, userID)
+	if err != nil {
+		apierror.NotFound(w, "secret not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(policyJSON) //nolint:errcheck
+}
+
+// PutSecretPolicy handles PUT /secrets/{id}/policy
+func (h *Handler) PutSecretPolicy(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	secretID := chi.URLParam(r, "id")
+	if _, err := validator.ValidateUUID(secretID); err != nil {
+		apierror.BadRequest(w, "invalid secret_id")
+		return
+	}
+	var cp policy.CustomPolicy
+	if err := json.NewDecoder(r.Body).Decode(&cp); err != nil {
+		apierror.BadRequest(w, "invalid policy body")
+		return
+	}
+	if err := cp.Validate(); err != nil {
+		apierror.BadRequest(w, err.Error())
+		return
+	}
+	policyJSON, _ := json.Marshal(cp)
+	if err := h.service.SetPolicy(r.Context(), secretID, userID, policyJSON); err != nil {
+		apierror.NotFound(w, "secret not found or not authorized")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(policyJSON) //nolint:errcheck
 }

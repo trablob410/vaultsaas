@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 )
 
@@ -144,4 +145,37 @@ func (h *Handler) listMembers(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(members) //nolint:errcheck
+}
+
+// GetProjectPolicy handles GET /projects/{project_id}/policy
+func (h *Handler) GetProjectPolicy(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "project_id")
+	policyJSON, err := h.service.GetPolicy(r.Context(), projectID)
+	if err != nil {
+		apierror.NotFound(w, "project not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(policyJSON) //nolint:errcheck
+}
+
+// PutProjectPolicy handles PUT /projects/{project_id}/policy
+func (h *Handler) PutProjectPolicy(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "project_id")
+	var cp policy.CustomPolicy
+	if err := json.NewDecoder(r.Body).Decode(&cp); err != nil {
+		apierror.BadRequest(w, "invalid policy body")
+		return
+	}
+	if err := cp.Validate(); err != nil {
+		apierror.BadRequest(w, err.Error())
+		return
+	}
+	policyJSON, _ := json.Marshal(cp)
+	if err := h.service.SetPolicy(r.Context(), projectID, policyJSON); err != nil {
+		apierror.NotFound(w, "project not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(policyJSON) //nolint:errcheck
 }

@@ -246,3 +246,31 @@ func (s *Service) DeleteSecret(ctx context.Context, userID, secretID string) err
 	}
 	return nil
 }
+
+// GetPolicy returns the policy_config JSON for a secret owned by userID.
+func (s *Service) GetPolicy(ctx context.Context, secretID, userID string) ([]byte, error) {
+	var policyJSON []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(policy_config, '{}') FROM secrets WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+		secretID, userID,
+	).Scan(&policyJSON)
+	if err != nil {
+		return nil, err
+	}
+	return policyJSON, nil
+}
+
+// SetPolicy saves the policy_config JSON for a secret owned by userID.
+func (s *Service) SetPolicy(ctx context.Context, secretID, userID string, policyJSON []byte) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE secrets SET policy_config = $1 WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL`,
+		policyJSON, secretID, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("secret not found or not authorized")
+	}
+	return nil
+}

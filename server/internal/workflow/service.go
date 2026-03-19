@@ -53,7 +53,7 @@ func NewService(pool *pgxpool.Pool) *Service {
 
 // CreateRequest creates a new access request, enforcing policy.
 func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (*AccessRequest, error) {
-	p, _, err := s.resolver.Resolve(ctx, input.SecretID, input.CredentialType)
+	p, customApprovers, err := s.resolver.Resolve(ctx, input.SecretID, input.CredentialType)
 	if err != nil {
 		// Fall back to tier defaults on resolver error (e.g. secret not found yet)
 		p = policy.ForCredentialType(input.CredentialType)
@@ -149,6 +149,17 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 		&req.DecidedBy, &req.DecidedAt, &req.ExpiresAt, &req.CreatedAt)
 	if insertErr != nil {
 		return nil, fmt.Errorf("inserting access request: %w", insertErr)
+	}
+
+	// Insert approval_steps for custom approvers from policy
+	for i, approverID := range customApprovers {
+		if _, stepErr := s.pool.Exec(ctx,
+			`INSERT INTO approval_steps (request_id, approver_user_id, step_order, status)
+			 VALUES ($1, $2, $3, 'pending')`,
+			req.ID, approverID, i+1,
+		); stepErr != nil {
+			return nil, fmt.Errorf("creating approval step: %w", stepErr)
+		}
 	}
 
 	return &req, nil
