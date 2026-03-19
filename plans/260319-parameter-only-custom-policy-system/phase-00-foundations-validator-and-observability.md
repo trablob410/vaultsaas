@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P1
-- **Status:** pending
+- **Status:** completed
 - **Description:** Build shared policy schema, validation, and resolution primitives with no behavior change yet.
 
 ## Goals
@@ -37,11 +37,11 @@
 6. Add metrics stubs/counters in policy package callsites.
 
 ## Todo List
-- [ ] Define v1 parameter schema type
-- [ ] Implement central validator
-- [ ] Implement resolver + weaker warning detector
-- [ ] Add unit tests for validator/resolver
-- [ ] Add observability fields/counters (no behavior switch)
+- [x] Define v1 parameter schema type
+- [x] Implement central validator
+- [x] Implement resolver + weaker warning detector
+- [x] Add unit tests for validator/resolver
+- [x] Add observability fields/counters (no behavior switch)
 
 ## Success Criteria
 1. Validator rejects unknown keys/type mismatch.
