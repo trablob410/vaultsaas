@@ -16,7 +16,7 @@ vaultsaas/
 │   │   ├── database/        # audit.go — audit log writer (Phase 1.3)
 │   │   ├── policy/          # Risk tier engine (Tier 1-4 by credential type) (Phase 1.4)
 │   │   ├── audit/           # Structured logger, SHA-256 hash chain, GET /audit/logs (Phase 1.4)
-│   │   ├── notify/          # SMTP email notifications, no-op fallback (Phase 1.4)
+│   │   ├── notify/          # SMTP email notifications, Slack/Telegram adapters, webhooks, action tokens (Phase 1.4/2)
 │   │   ├── consent/         # User consent recording, POST /consent (Phase 1.4)
 │   │   ├── workflow/        # Approval state machine, multi-step approval chains, policy enforcement; IsAssignedApprover; rejection_reason persistence; approver/owner access checks on GetRequest/Approve/Reject/IssueCredential; dual-auth (user+agent) on CreateRequest/GetCredential/RevokeCredential; project-scope guard for agent cross-user requests; migration 000025 makes requester_user_id nullable (Phase 1.4/13/hardening/p0-gap)
 │   │   ├── config/          # GoogleClientID/Secret/RedirectURL, DashboardURL (Phase 1.5)
@@ -28,11 +28,15 @@ vaultsaas/
 │   │   ├── dynsecret/       # Provider interface, PostgresProvider, lease management, AES-256-GCM config+credential encryption, GetLeaseProviderID, auto-expiry worker (Phase 11/hardening)
 │   │   ├── rbac/            # Role permission matrix (owner/admin/member/viewer), ResourceScans+ResourceDynSecret constants, RBAC middleware; 400 on missing project_id (Phase 13/hardening)
 │   │   ├── ratelimit/       # Redis sliding-window per-agent rate limiting (go-redis/v9); Middleware(rpm) gates on X-Agent-ID header; fail-open on Redis errors (Phase 13/hardening)
-│   │   └── usage/           # Usage tracking, free tier enforcement middleware, GET /orgs/{id}/usage (Phase 15)
+│   │   ├── usage/           # Usage tracking, free tier enforcement middleware, GET /orgs/{id}/usage (Phase 15)
+│   │   └── policy/          # Custom approval policy resolver, 3-level hierarchy (secret → project → tier defaults), GET|PUT endpoints (Phase 2)
 │   ├── pkg/
 │   │   ├── apierror/        # Standard API error JSON (Phase 1.3)
 │   │   ├── crypto/          # Storage key generation (Phase 1.3)
 │   │   └── validator/       # Input validation helpers (Phase 1.3)
+│   ├── internal/database/migrations/
+│   │   └── 000028_telegram_link_tokens.{up,down}.sql # Telegram user link tokens (Phase 2)
+│   │
 │   ├── cmd/
 │   │   ├── server/          # Main entry point
 │   │   ├── migrate/         # Migration runner
@@ -51,6 +55,7 @@ vaultsaas/
 │   │   │   │   ├── secrets/         # Secrets list + create/edit dialog + detail page
 │   │   │   │   ├── approvals/       # Tabbed approval list + approve/reject dialog
 │   │   │   │   ├── audit/           # Paginated audit log table
+│   │   │   │   ├── projects/        # Project list + create; [id]/settings policy editor (Phase 2)
 │   │   │   │   ├── settings/        # User profile, sign-out, upgrade page with UsageBar (Phase 15)
 │   │   │   │   ├── orgs/            # Org list + create (Phase 8)
 │   │   │   │   ├── projects/        # Project list + create (Phase 8)
@@ -63,9 +68,11 @@ vaultsaas/
 │   │   │   ├── layout.tsx           # Sidebar nav + Header with user dropdown
 │   │   │   ├── page.tsx
 │   │   │   └── globals.css          # Dark mode CSS variables (zinc/slate palette)
-│   │   ├── components/ui/           # shadcn/ui primitives (button, input, card, badge,
-│   │   │   │                        #   dialog, table, dropdown-menu, select, label,
-│   │   │   │                        #   textarea, separator, avatar)
+│   │   ├── components/
+│   │   │   ├── ui/                  # shadcn/ui primitives (button, input, card, badge, etc.)
+│   │   │   ├── policy-editor.tsx    # PolicyEditor component for custom approval policies (Phase 2)
+│   │   │   ├── secret-policy-section.tsx # SecretPolicySection wrapper (Phase 2)
+│   │   │   └── project-policy-section.tsx # ProjectPolicySection wrapper (Phase 2)
 │   │   └── lib/
 │   │       ├── api-client.ts        # Typed fetch wrapper around BFF proxy
 │   │       └── utils.ts             # cn() and shared helpers
@@ -94,6 +101,18 @@ vaultsaas/
 │   │   └── http.rs          # axum HTTP server: POST /mcp, GET /mcp/sse (SSE), Bearer auth (Phase 12)
 │   ├── Cargo.toml
 │   └── Dockerfile
+│
+├── valt-cli/                # valt CLI binary (Go, Cobra) — standalone tool for agent-free credential access (Phase 2)
+│   ├── cmd/
+│   │   └── main.go          # CLI entry point
+│   ├── internal/
+│   │   ├── keychain.go      # OS keychain integration (cross-platform)
+│   │   ├── oauth.go         # Device-like OAuth flow with browser redirect
+│   │   ├── mcp_installer.go # Auto-detect MCP server and update config
+│   │   └── config.go        # Config at ~/.valt/config.json
+│   ├── go.mod
+│   ├── .goreleaser.yml      # Cross-platform binary builds (goreleaser)
+│   └── README.md
 │
 ├── sdk/
 │   ├── go/                  # Go SDK (stdlib only, go.mod: github.com/valt-dev/valt-go) (Phase 14)
@@ -149,11 +168,12 @@ vaultsaas/
 | 15 Cloud Free Tier | DONE — 2026-03-17 |
 | 16 Security Hardening | DONE — 2026-03-17 |
 | P0 Gap: Agent Cross-User Access Request | DONE — 2026-03-18 |
+| 2 Approval Channels + Custom Policies + CLI | DONE — 2026-03-19 |
 
-- **server**: All Phase 1.3-1.5 backend live; Google OAuth2, org/workspace/project hierarchy, agent identity, secret scanner, dynamic secrets, RBAC, rate limiting, usage/free tier; security hardening (AES-256-GCM on provider configs + lease credentials, RBAC on scanner/dynsecret project routes, rate limiter gated on X-Agent-ID, rejection_reason on approval_steps, org-scoped usage COUNT, approver/owner access checks on workflow); P0 gap fix: dual-auth middleware on workflow routes, project-scope guard for agent cross-user requests, migration 000025 (nullable requester_user_id); migrations 000001-000025; 74+ Go unit tests + 30 new passing
-- **dashboard**: Full Next.js App Router — sign-in, secrets CRUD, approvals, audit, orgs, projects, agents, scans, providers, settings/upgrade; BFF proxy; 19 vitest tests passing
+- **server**: Phase 1.3-1.5 + Phase 2 complete; Google OAuth2, org/workspace/project hierarchy, agent identity, secret scanner, dynamic secrets, RBAC, rate limiting, usage/free tier, approval channels (email action tokens, Slack Block Kit, Telegram bot), custom approval policies (3-level hierarchy: secret → project → tier defaults), policy GET|PUT endpoints; security hardening (AES-256-GCM on provider configs + lease credentials, RBAC, rate limiting, rejection_reason persistence); migrations 000001-000028; 74+ Go unit tests passing
+- **dashboard**: Full Next.js App Router — sign-in, secrets CRUD, approvals, audit, orgs, projects (with policy editor), agents, scans, providers, settings/upgrade; BFF proxy; PolicyEditor, SecretPolicySection, ProjectPolicySection components; 19 vitest tests passing
 - **mcp-server**: 8 MCP tools, 3 resources; stdio + HTTP/SSE dual transport (axum); Bearer auth; 17 regex scanner patterns; OS keychain auth; 11+ unit tests passing
 - **sdk**: Go SDK (`github.com/valt-dev/valt-go`, stdlib only) and Python SDK (urllib only)
-- **cli**: `valt` CLI binary (cobra) with `login`, `secrets`, `agents`, `scan`, `run` subcommands; config at `~/.valt/config.json`
+- **cli**: `valt-cli` binary (Go, Cobra) standalone agent-free credential access; OAuth device-like flow with browser redirect, OS keychain integration, auto-detect MCP server for installation, config at `~/.valt/config.json`, cross-platform builds via goreleaser
 - **testing**: Makefile targets `test-unit`, `test-integration`, `test-dashboard`, `test-mcp`, `security`; `.golangci.yml` enabled
 - **infra**: Full Docker Compose (dev/prod) with JWT key volume mount, optional Redis, Caddy with CSP/security headers

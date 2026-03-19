@@ -1,5 +1,58 @@
 # Project Changelog
 
+## [2.0.0] - 2026-03-19 — Phase 2: Product-Market Fit (Approval Channels, Custom Policies, valt CLI)
+
+### Added
+
+**Phase 2.1 — Approval Channels (Email + Slack + Telegram)**
+- Email action links: `request_action_tokens` table; one-click approve/reject links with 72h TTL; public `/api/v1/action-tokens/{token}/redeem` endpoint
+- Notification channel settings: `user_notification_channels` table (email/slack/telegram); `GET/POST/DELETE /me/notification-channels` API; dashboard settings UI
+- Slack bot: Block Kit approval messages via `chat.postMessage`; `POST /api/v1/webhooks/slack/interactions` webhook with HMAC-SHA256 signature verification; button callbacks → approve/reject actions
+- Telegram bot: inline keyboard approval buttons; `POST /api/v1/webhooks/telegram` webhook; account linking flow via `/start {link_token}` deep links; `telegram_link_tokens` table
+
+**Phase 2.2 — Custom Policies**
+- `policy_config JSONB` columns added to `secrets` and `projects` tables (migration 000029)
+- Three-level policy resolver: secret-level → project-level → global tier defaults
+- `GET /secrets/{id}/policy` and `PUT /secrets/{id}/policy` endpoints with RBAC
+- `GET /projects/{id}/policy` and `PUT /projects/{id}/policy` endpoints with project admin auth
+- Dashboard PolicyEditor component (shadcn/ui) for editing approval rules, duration caps, auto-approve overrides per secret and per project
+
+**Phase 2.3 — valt CLI**
+- CLI binary (Go) with config at `~/.valt/config.toml` and OS keychain token storage
+- `valt setup`: interactive onboarding with Google OAuth flow; org/project selection; agent token creation
+- `valt mcp install --ide claude|cursor|vscode`: MCP server config generation
+- `valt list`: lists accessible secrets with table output
+- `valt get <secret-name>`: retrieves secret value (auto-requests if denied, polls for approval)
+- `valt run -- <command>`: injects all project secrets as env vars; executes command
+- `valt request <secret-name> --reason "..." --duration 2h`: create access request via CLI
+- `valt status <request-id>`: check request approval status
+- goreleaser config: cross-platform builds (Linux/Mac/Windows, amd64/arm64)
+- GitHub Actions CI/CD workflow for automated releases to GitHub Releases
+
+### Security Impact
+| Finding | Severity | Status |
+|---------|----------|--------|
+| Approvers unable to act without dashboard (friction) | MEDIUM | Fixed |
+| Custom policies not configurable (one-size-fits-all) | MEDIUM | Fixed |
+| CLI users unable to work headless (Dev UX) | MEDIUM | Fixed |
+
+### API Routes Added
+
+| Method | Route | Auth | Description |
+|--------|-------|------|-------------|
+| POST | `/api/v1/action-tokens/{token}/redeem` | — | Redeem email action link (public) |
+| GET | `/me/notification-channels` | JWT | List user's notification channels |
+| POST | `/me/notification-channels` | JWT | Add/update notification channel |
+| DELETE | `/me/notification-channels/{id}` | JWT | Remove notification channel |
+| GET | `/secrets/{id}/policy` | JWT + RBAC | Get secret custom policy |
+| PUT | `/secrets/{id}/policy` | JWT + RBAC | Save secret custom policy |
+| GET | `/projects/{id}/policy` | JWT + RBAC | Get project custom policy |
+| PUT | `/projects/{id}/policy` | JWT + RBAC | Save project custom policy |
+| POST | `/webhooks/slack/interactions` | — | Slack interactivity callback (public) |
+| POST | `/webhooks/telegram` | — | Telegram webhook (public) |
+
+---
+
 ## [1.5.0] - 2026-03-18 — P0 Gap: Agent Cross-User Access Request
 
 ### Fixed

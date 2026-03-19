@@ -101,11 +101,26 @@
 - [x] `mcp-server/src/client.rs`: `create_access_request` sends `requester_type: "ai_agent"`
 - [x] 30 new tests pass
 
-## Phase 2: Product-Market Fit [Future]
-- Zalo/Slack notifications
-- VSCode extension
-- Team management + RBAC
-- TOTP 2FA
+## Phase 2: Product-Market Fit [DONE - 2026-03-19]
+
+### Phase 2.1: Approval Channels (Ph01-04) [DONE - 2026-03-19]
+- [x] Email action links (one-click approve/reject), request_action_tokens table
+- [x] Notification channel settings (DB schema, API, dashboard UI)
+- [x] Slack bot (Block Kit, HMAC-SHA256 webhook, interactivity handler)
+- [x] Telegram bot (inline keyboard, deep-link account linking, telegram_link_tokens table)
+
+### Phase 2.2: Custom Policies (Ph01-03) [DONE - 2026-03-19]
+- [x] DB migrations: policy_config JSONB on secrets + projects tables
+- [x] Three-level policy resolver (secret → project → tier defaults)
+- [x] GET/PUT /secrets/{id}/policy and /projects/{project_id}/policy endpoints
+- [x] Dashboard PolicyEditor UI with per-secret and per-project settings pages
+
+### Phase 2.3: valt CLI (Ph01-05) [DONE - 2026-03-19]
+- [x] Project scaffold with config/keychain/API client (Cobra, go-keyring, toml)
+- [x] `valt setup` & `valt mcp install` (OAuth CLI flow, IDE config generation)
+- [x] `valt list` / `valt get` / `valt run` (secret listing, retrieval, env injection)
+- [x] `valt request` & `valt status` (access request creation and polling)
+- [x] goreleaser config & CI release workflow (cross-platform builds: Linux/Mac/Windows)
 
 ## Phase 3: Scale [Future]
 - Kubernetes migration

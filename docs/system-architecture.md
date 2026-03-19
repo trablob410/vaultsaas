@@ -99,6 +99,24 @@ AI Agent (Claude, etc.)
 1. OS keychain via `keyring` crate (primary)
 2. `VALT_TOKEN` env var / `VALT_AGENT_TOKEN` env var (fallback)
 
+## Valt CLI (Phase 2)
+
+**Pattern:** Standalone Go binary for agent-free credential access; cross-platform via goreleaser.
+
+```
+Developer Machine
+  └─▶ valt-cli (macOS/Linux/Windows binary)
+        ├─ Device-like OAuth flow (browser redirect, validates callback on localhost)
+        ├─ OS keychain: store OAuth token + agent token (macOS: Keychain, Linux: pass, Windows: Credential Manager)
+        ├─ Auto-detect MCP server and update ~/.mcp/claude.json for seamless MCP install
+        └─ Config: ~/.valt/config.json (auth state, server URL)
+```
+
+- **OAuth flow**: CLI opens browser, authenticates user, receives temporary code → exchanges for token, stores in keychain
+- **Keychain integration**: Cross-platform (Keychain, pass, Credential Manager) via `internal/keychain.go`
+- **MCP installer**: Detects running MCP server, auto-updates `.mcp/claude.json` config to include valt
+- **Binary distribution**: `.goreleaser.yml` builds amd64/arm64 for macOS/Linux/Windows; published on GitHub Releases
+
 ## Test Architecture (Phase 1.7)
 
 | Layer | Runner | Count | Location |
@@ -198,6 +216,21 @@ Go linting via `.golangci.yml` (govet shadow, errcheck, staticcheck, unused).
 | `internal/agent/handler.go` | REST handlers for agent and token endpoints |
 | `internal/agent/middleware.go` | Agent token auth middleware (validates `agent_tokens` table) |
 
+### Phase 2 (Approval channels + custom policies)
+
+| Package | Purpose |
+|---------|---------|
+| `internal/notify/action_token.go` | Email action token generation & validation (HMAC-signed, short-lived) |
+| `internal/notify/channel_handler.go` | Notification channel registry & delivery dispatcher |
+| `internal/notify/channel_store.go` | In-memory store for approval action mappings (request_id → approval action) |
+| `internal/notify/slack.go` | SlackAdapter: Block Kit interactive messages with Approve/Reject buttons |
+| `internal/notify/slack_webhook.go` | SlackWebhookHandler: HMAC-SHA256 signature verification, button callback routing |
+| `internal/notify/telegram.go` | TelegramAdapter: Inline keyboard buttons, /start linking flow for account association |
+| `internal/notify/telegram_webhook.go` | TelegramWebhookHandler: Bot API callbacks, Telegram user → Valt user mapping |
+| `internal/policy/resolver.go` | Custom policy resolver: 3-level hierarchy (secret → project → tier defaults) |
+| `internal/vault/handler.go` (new) | `GetSecretPolicy`, `PutSecretPolicy` handlers — secret-level policy CRUD |
+| `internal/project/handler.go` (new) | `GetProjectPolicy`, `PutProjectPolicy` handlers — project-level policy CRUD |
+
 ## API Routes
 
 ### Phase 1.3
@@ -272,6 +305,19 @@ Go linting via `.golangci.yml` (govet shadow, errcheck, staticcheck, unused).
 | POST | `/api/v1/agents/{id}/tokens` | JWT | Issue new agent token |
 | DELETE | `/api/v1/agents/{id}/tokens/{tid}` | JWT | Revoke agent token |
 
+### Phase 2 (Approval channels + custom policies + CLI)
+
+| Method | Route | Auth | Description |
+|--------|-------|------|-------------|
+| POST | `/api/v1/me/telegram-link` | JWT | Generate Telegram link token, user /start links account |
+| GET | `/api/v1/secrets/{id}/policy` | JWT | Get custom policy for secret |
+| PUT | `/api/v1/secrets/{id}/policy` | JWT | Set custom policy for secret |
+| GET | `/api/v1/projects/{project_id}/policy` | JWT | Get custom policy for project |
+| PUT | `/api/v1/projects/{project_id}/policy` | JWT | Set custom policy for project |
+| GET | `/api/v1/credentials/active` | Agent | List active credentials (agent use) |
+| POST | `/webhooks/slack/interactions` | Slack Signature | Handle Slack button clicks (approve/reject) |
+| POST | `/webhooks/telegram` | Telegram Secret Token | Handle Telegram bot messages (approval buttons, /start) |
+
 ## Agent Auth Flow (Phase 9)
 
 ```
@@ -284,6 +330,60 @@ MCP Server (Rust)
 
 - Agent tokens are stored as hashed values in `agent_tokens` table; plaintext returned only at creation.
 - `authenticate_agent` MCP tool accepts a token, stores it in the OS keychain, and clears `VALT_AGENT_TOKEN` env usage.
+
+## Approval Channels (Phase 2)
+
+Approvers receive multi-channel notifications with action tokens or interactive controls:
+
+### Email (Phase 1.4)
+- Action token links: `POST /api/v1/requests/{id}/approve?token=XXXXX` (short-lived, HMAC-signed)
+- SMTP delivery via `internal/notify/email.go`
+- Fallback: no-op when SMTP not configured
+
+### Slack (Phase 2)
+- SlackAdapter: Block Kit interactive message (`POST /webhooks/slack/interactions`)
+- Approval buttons (Approve/Reject) trigger webhook callback with action_id
+- `slack_webhook.go`: Verifies Slack signature (HMAC-SHA256), routes to approval endpoint
+- Requires: `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` env vars
+
+### Telegram (Phase 2)
+- TelegramAdapter: Inline keyboard buttons + /start linking flow
+- Webhook endpoint: `POST /webhooks/telegram` (Telegram API callback)
+- Link token flow: `POST /me/telegram-link` generates link token, `/start {token}` on Telegram links user account
+- Approval buttons resolve to `POST /api/v1/requests/{id}/approve` with Bearer token from Telegram user mapping
+- Requires: `TELEGRAM_BOT_TOKEN` env var; `telegram_link_tokens` table stores temp link tokens
+
+### Action Token Flow
+```
+Approver ◀─── Notification (email/Slack/Telegram) ◀─── request pending
+   │
+   └──▶ Click Approve ──▶ POST /api/v1/requests/{id}/approve
+         (token or auth) ──▶ Validate token/auth
+                            Update request state → approved
+                            Issue credential
+```
+
+## Custom Approval Policies (Phase 2)
+
+Policies enforce approval rules per-secret and per-project. Three-level resolution hierarchy:
+
+1. **Secret-level policy** (if set): `GET|PUT /api/v1/secrets/{id}/policy`
+   - Overrides project policy for that secret
+   - Properties: `require_reason`, `auto_approve`, `approval_steps`, `duration_minutes`
+
+2. **Project-level policy** (if set): `GET|PUT /api/v1/projects/{project_id}/policy`
+   - Applies to all secrets in project (unless overridden)
+   - Same properties as secret policy
+
+3. **Tier defaults** (Phase 1.4)
+   - Fallback when no secret/project policy exists
+   - Based on credential risk tier (Tier 1-4)
+   - Example: Tier 3 requires approver chain, max 1-hour duration
+
+### Dashboard UI (Phase 2)
+- `PolicyEditor` component: Edit approval steps, reason requirements, duration, auto-approve toggle
+- `SecretPolicySection`: Per-secret policy editor (secrets detail page)
+- `ProjectPolicySection`: Per-project policy editor (project settings page)
 
 ## Security Architecture
 
