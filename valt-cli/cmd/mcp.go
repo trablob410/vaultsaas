@@ -55,7 +55,8 @@ func runMCPInstall(cmd *cobra.Command, args []string) error {
 	case "cursor":
 		return writeIDEConfig(cursorConfigPath(), block, "Cursor")
 	default:
-		fmt.Println("Add this to your IDE's MCP config:\n")
+		fmt.Println("Add this to your IDE's MCP config:")
+		fmt.Println()
 		fmt.Println(string(block))
 	}
 	return nil
