@@ -28,6 +28,16 @@ func NewHandler(service *Service, db *pgxpool.Pool) *Handler {
 // Routes registers all scanner routes.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
+	h.registerRoutes(r)
+	return r
+}
+
+// RegisterRoutes registers scanner routes onto an existing router group.
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	h.registerRoutes(r)
+}
+
+func (h *Handler) registerRoutes(r chi.Router) {
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceScans, rbac.ActionWrite)).
 		Post("/projects/{project_id}/scans", h.createScan)
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceScans, rbac.ActionRead)).
@@ -35,7 +45,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/scans/{scan_id}/findings", h.listFindings)
 	r.Post("/scans/{scan_id}/findings/{finding_id}/import", h.importFinding)
 	r.Post("/scans/{scan_id}/findings/{finding_id}/dismiss", h.dismissFinding)
-	return r
 }
 
 type createScanRequest struct {

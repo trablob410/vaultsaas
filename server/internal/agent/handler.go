@@ -25,13 +25,22 @@ func NewHandler(service *Service) *Handler {
 // Routes returns a chi.Router with all agent routes.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
+	h.registerRoutes(r)
+	return r
+}
+
+// RegisterRoutes registers agent routes onto an existing router group.
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	h.registerRoutes(r)
+}
+
+func (h *Handler) registerRoutes(r chi.Router) {
 	r.Post("/projects/{project_id}/agents", h.createAgent)
 	r.Get("/projects/{project_id}/agents", h.listAgents)
 	r.Get("/agents/{agent_id}", h.getAgent)
 	r.Post("/agents/{agent_id}/tokens", h.issueToken)
 	r.Delete("/agents/{agent_id}/tokens/{token_id}", h.revokeToken)
 	r.Get("/agents/{agent_id}/tokens", h.listTokens)
-	return r
 }
 
 type createAgentRequest struct {

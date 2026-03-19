@@ -181,11 +181,11 @@ func main() {
 			r.Mount("/consent", consentHandler.Routes())
 			r.Mount("/orgs", orgHandler.Routes())
 			r.Mount("/orgs/{org_id}/workspaces", workspaceHandler.Routes())
-			r.Mount("/", projectHandler.Routes())
-			r.Mount("/", agentHandler.Routes())
-			r.Mount("/", scannerHandler.Routes())
-			r.Mount("/", dynHandler.Routes())
-			r.Mount("/", usageHandler.Routes())
+			projectHandler.RegisterRoutes(r)
+			agentHandler.RegisterRoutes(r)
+			scannerHandler.RegisterRoutes(r)
+			dynHandler.RegisterRoutes(r)
+			usageHandler.RegisterRoutes(r)
 		})
 
 		// Dual-auth routes: accept either user JWT or agent bearer token

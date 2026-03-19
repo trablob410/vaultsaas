@@ -21,8 +21,17 @@ func NewHandler(tracker *Tracker) *Handler {
 // Routes returns the chi router for usage endpoints.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/orgs/{org_id}/usage", h.getUsage)
+	h.registerRoutes(r)
 	return r
+}
+
+// RegisterRoutes registers usage routes onto an existing router group.
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	h.registerRoutes(r)
+}
+
+func (h *Handler) registerRoutes(r chi.Router) {
+	r.Get("/orgs/{org_id}/usage", h.getUsage)
 }
 
 // getUsage returns usage stats for an org.
