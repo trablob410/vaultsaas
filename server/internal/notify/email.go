@@ -31,6 +31,20 @@ func NewEmailSender(host string, port int, user, password, from string) *EmailSe
 	}
 }
 
+func buildApprovalEmail(secretName, requester, reason, approveURL, rejectURL string) string {
+	return fmt.Sprintf(`Secret access request requires your approval.
+
+Secret:    %s
+Requester: %s
+Reason:    %s
+
+Approve: %s
+Reject:  %s
+
+This link expires in 72 hours and can only be used once.
+`, secretName, requester, reason, approveURL, rejectURL)
+}
+
 // Send sends a plaintext email.
 func (e *EmailSender) Send(_ context.Context, to, subject, body string) error {
 	addr := net.JoinHostPort(e.host, strconv.Itoa(e.port))

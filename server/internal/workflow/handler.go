@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -21,25 +22,27 @@ import (
 
 // Handler serves workflow HTTP endpoints.
 type Handler struct {
-	service   *Service
-	credMgr   *CredentialManager
-	vaultSvc  *vault.Service
-	auditLog  *audit.Logger
-	notifySvc *notify.Service
-	masterKey []byte
-	pool      *pgxpool.Pool
+	service    *Service
+	credMgr    *CredentialManager
+	vaultSvc   *vault.Service
+	auditLog   *audit.Logger
+	notifySvc  *notify.Service
+	tokenStore *notify.ActionTokenStore
+	masterKey  []byte
+	pool       *pgxpool.Pool
 }
 
 // NewHandler creates a workflow Handler.
-func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Service, auditLog *audit.Logger, notifySvc *notify.Service, masterKey []byte, pool *pgxpool.Pool) *Handler {
+func NewHandler(svc *Service, credMgr *CredentialManager, vaultSvc *vault.Service, auditLog *audit.Logger, notifySvc *notify.Service, tokenStore *notify.ActionTokenStore, masterKey []byte, pool *pgxpool.Pool) *Handler {
 	return &Handler{
-		service:   svc,
-		credMgr:   credMgr,
-		vaultSvc:  vaultSvc,
-		auditLog:  auditLog,
-		notifySvc: notifySvc,
-		masterKey: masterKey,
-		pool:      pool,
+		service:    svc,
+		credMgr:    credMgr,
+		vaultSvc:   vaultSvc,
+		auditLog:   auditLog,
+		notifySvc:  notifySvc,
+		tokenStore: tokenStore,
+		masterKey:  masterKey,
+		pool:       pool,
 	}
 }
 
@@ -163,10 +166,14 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Notify if policy requires it
+	// Notify if policy requires approval — fetch owner email first
 	p := policy.ForCredentialType(secret.CredentialType)
 	if p.NotifyOnAccess && h.notifySvc != nil {
-		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), "", secret.Name, callerDesc, body.Reason)
+		var ownerEmail string
+		_ = h.pool.QueryRow(r.Context(),
+			`SELECT email FROM users WHERE id = $1`, secret.UserID,
+		).Scan(&ownerEmail)
+		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), ownerEmail, req.ID, secret.Name, callerDesc, body.Reason)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -428,6 +435,57 @@ func (h *Handler) GetCredential(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(session)
+}
+
+// RedeemActionToken handles POST /action-tokens/{token}/redeem?action=approve|reject
+// This is a PUBLIC endpoint — no JWT required.
+func (h *Handler) RedeemActionToken(w http.ResponseWriter, r *http.Request) {
+	rawToken := chi.URLParam(r, "token")
+	action := r.URL.Query().Get("action")
+	if action != "approve" && action != "reject" {
+		http.Error(w, "invalid action", http.StatusBadRequest)
+		return
+	}
+
+	tok, err := h.tokenStore.Consume(r.Context(), rawToken)
+	if err != nil {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusGone)
+		fmt.Fprint(w, "<h2>Link expired or already used.</h2><p>You can close this tab.</p>")
+		return
+	}
+	if tok.Action != action {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, "<h2>Invalid action for this link.</h2>")
+		return
+	}
+
+	switch action {
+	case "approve":
+		req, err := h.service.Approve(r.Context(), tok.RequestID, "email-action")
+		if err != nil {
+			http.Error(w, "Failed to approve: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		secret, _ := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
+		credType := ""
+		if secret != nil {
+			credType = secret.CredentialType
+		}
+		_, _ = h.credMgr.IssueCredential(r.Context(), req.ID, credType, req.RequestedDurationMinutes)
+		h.auditLog.LogFromRequest(r, "email-action", "access_request.approve", "access_request", req.ID)
+	case "reject":
+		_, err := h.service.Reject(r.Context(), tok.RequestID, "email-action", "Rejected via email link")
+		if err != nil {
+			http.Error(w, "Failed to reject: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		h.auditLog.LogFromRequest(r, "email-action", "access_request.reject", "access_request", tok.RequestID)
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, "<h2>Request %sd successfully.</h2><p>You can close this tab.</p>", action)
 }
 
 // RevokeCredential handles POST /credentials/{request_id}/revoke

@@ -90,7 +90,8 @@ func main() {
 	if emailSender != nil {
 		emailNotifier = emailSender
 	}
-	notifySvc := notify.NewService(emailNotifier)
+	tokenStore := notify.NewActionTokenStore(pool)
+	notifySvc := notify.NewService(emailNotifier, tokenStore, cfg.BaseURL)
 
 	authHandler := auth.NewHandler(pool, jwtMgr, cfg)
 	vaultService := vault.NewService(pool, storage)
@@ -98,7 +99,7 @@ func main() {
 
 	workflowSvc := workflow.NewService(pool)
 	credMgr := workflow.NewCredentialManager(pool)
-	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, masterKey, pool)
+	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, tokenStore, masterKey, pool)
 
 	auditHandler := audit.NewHandler(pool)
 
@@ -165,6 +166,9 @@ func main() {
 			r.Use(loginLimiter.IPMiddleware())
 			r.Mount("/", authHandler.Routes())
 		})
+
+		// Public: email action-token redemption (no JWT required)
+		r.Post("/action-tokens/{token}/redeem", workflowHandler.RedeemActionToken)
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware(jwtMgr))

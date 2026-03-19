@@ -1,6 +1,10 @@
 package notify
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"time"
+)
 
 // Notifier sends notifications.
 type Notifier interface {
@@ -9,21 +13,36 @@ type Notifier interface {
 
 // Service routes notifications through available notifiers.
 type Service struct {
-	email Notifier
+	email   Notifier
+	tokens  *ActionTokenStore
+	baseURL string
 }
 
-// NewService creates a notification Service. Pass nil for no-op mode.
-func NewService(email Notifier) *Service {
-	return &Service{email: email}
+// NewService creates a notification Service. Pass nil email for no-op mode.
+func NewService(email Notifier, tokens *ActionTokenStore, baseURL string) *Service {
+	return &Service{email: email, tokens: tokens, baseURL: baseURL}
 }
 
-// NotifyApprovalNeeded sends an approval-needed notification.
-func (s *Service) NotifyApprovalNeeded(ctx context.Context, to, secretName, requester, reason string) error {
-	if s.email == nil {
+// NotifyApprovalNeeded sends an approval email with one-click approve/reject links.
+func (s *Service) NotifyApprovalNeeded(ctx context.Context, to, requestID, secretName, requester, reason string) error {
+	if s.email == nil || to == "" {
 		return nil
 	}
-	subject := "Valt: Access Request Needs Approval"
-	body := "Secret: " + secretName + "\nRequester: " + requester + "\nReason: " + reason + "\n\nPlease log in to approve or reject this request."
+
+	approveToken, err := s.tokens.Create(ctx, requestID, "approve", 72*time.Hour)
+	if err != nil {
+		return fmt.Errorf("creating approve token: %w", err)
+	}
+	rejectToken, err := s.tokens.Create(ctx, requestID, "reject", 72*time.Hour)
+	if err != nil {
+		return fmt.Errorf("creating reject token: %w", err)
+	}
+
+	approveURL := s.baseURL + "/api/v1/action-tokens/" + approveToken + "/redeem?action=approve"
+	rejectURL := s.baseURL + "/api/v1/action-tokens/" + rejectToken + "/redeem?action=reject"
+
+	subject := "Valt: Access Request Needs Your Approval"
+	body := buildApprovalEmail(secretName, requester, reason, approveURL, rejectURL)
 	return s.email.Send(ctx, to, subject, body)
 }
 

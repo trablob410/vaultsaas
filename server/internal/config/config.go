@@ -51,6 +51,9 @@ type Config struct {
 
 	// Redis (optional — empty disables Redis-backed features)
 	RedisURL string `envconfig:"REDIS_URL" default:""`
+
+	// Base URL for generating action links in emails
+	BaseURL string `envconfig:"BASE_URL" default:"http://localhost:8080"`
 }
 
 // MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.
