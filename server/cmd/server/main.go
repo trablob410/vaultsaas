@@ -91,6 +91,8 @@ func main() {
 		emailNotifier = emailSender
 	}
 	tokenStore := notify.NewActionTokenStore(pool)
+	channelStore := notify.NewChannelStore(pool)
+	channelHandler := notify.NewChannelHandler(channelStore)
 	notifySvc := notify.NewService(emailNotifier, tokenStore, cfg.BaseURL)
 
 	authHandler := auth.NewHandler(pool, jwtMgr, cfg)
@@ -177,6 +179,9 @@ func main() {
 				r.Use(agentRateLimiter.Middleware(60))
 			}
 
+			r.Get("/me/notification-channels", channelHandler.List)
+			r.Post("/me/notification-channels", channelHandler.Upsert)
+			r.Delete("/me/notification-channels/{id}", channelHandler.Delete)
 			r.Mount("/secrets", vaultHandler.Routes())
 			r.Get("/access-requests", workflowHandler.ListPending)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)
@@ -198,6 +203,7 @@ func main() {
 			r.Use(apiLimiter.Middleware())
 			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
 			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
+			r.Get("/credentials/active", workflowHandler.GetActiveCredentials)
 			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
 			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
 		})

@@ -488,6 +488,103 @@ func (h *Handler) RedeemActionToken(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<h2>Request %sd successfully.</h2><p>You can close this tab.</p>", action)
 }
 
+// activeCredentialItem is the response shape for active credential listings.
+type activeCredentialItem struct {
+	RequestID  string `json:"request_id"`
+	SecretID   string `json:"secret_id"`
+	SecretName string `json:"secret_name"`
+	Value      string `json:"value"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+// GetActiveCredentials handles GET /credentials/active?project_id=<id>
+// Returns all active credential sessions with decrypted values for the caller.
+func (h *Handler) GetActiveCredentials(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	agentID := agent.AgentIDFromContext(r.Context())
+	projectID := r.URL.Query().Get("project_id")
+
+	if userID == "" && agentID == "" {
+		apierror.Unauthorized(w, "authentication required")
+		return
+	}
+
+	// Build query: find active sessions for this caller in the given project.
+	query := `
+		SELECT ar.id, ar.secret_id, s.name, cs.expires_at,
+		       s.encrypted_dek, s.storage_key
+		FROM credential_sessions cs
+		JOIN access_requests ar ON ar.id = cs.access_request_id
+		JOIN secrets s ON s.id = ar.secret_id
+		WHERE cs.status = 'active' AND cs.expires_at > NOW()`
+
+	args := []interface{}{}
+	argIdx := 1
+
+	if userID != "" {
+		query += fmt.Sprintf(" AND ar.requester_user_id = $%d", argIdx)
+		args = append(args, userID)
+		argIdx++
+	} else {
+		query += fmt.Sprintf(" AND ar.ai_agent_id = $%d", argIdx)
+		args = append(args, agentID)
+		argIdx++
+	}
+
+	if projectID != "" {
+		query += fmt.Sprintf(" AND s.project_id = $%d", argIdx)
+		args = append(args, projectID)
+		argIdx++
+	}
+
+	rows, err := h.pool.Query(r.Context(), query, args...)
+	if err != nil {
+		log.Printf("GetActiveCredentials: query failed: %v", err)
+		apierror.InternalError(w, "failed to fetch credentials")
+		return
+	}
+	defer rows.Close()
+
+	items := []activeCredentialItem{}
+	for rows.Next() {
+		var item activeCredentialItem
+		var encDEK []byte
+		var storageKey string
+		var expiresAt interface{}
+		if err := rows.Scan(&item.RequestID, &item.SecretID, &item.SecretName,
+			&expiresAt, &encDEK, &storageKey); err != nil {
+			log.Printf("GetActiveCredentials: scan error: %v", err)
+			continue
+		}
+		if t, ok := expiresAt.(interface{ String() string }); ok {
+			item.ExpiresAt = t.String()
+		}
+
+		// Decrypt value if DEK present
+		if len(encDEK) > 0 {
+			blob, blobErr := h.vaultSvc.GetBlob(r.Context(), storageKey)
+			if blobErr == nil {
+				dek, dekErr := crypto.DecryptAES256GCM(h.masterKey, encDEK)
+				if dekErr == nil {
+					if plaintext, ptErr := crypto.DecryptAES256GCM(dek, blob); ptErr == nil {
+						item.Value = string(plaintext)
+					}
+					for i := range dek {
+						dek[i] = 0
+					}
+				}
+			}
+		}
+
+		items = append(items, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"credentials": items,
+	})
+}
+
 // RevokeCredential handles POST /credentials/{request_id}/revoke
 func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
