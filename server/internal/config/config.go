@@ -54,6 +54,14 @@ type Config struct {
 
 	// Base URL for generating action links in emails
 	BaseURL string `envconfig:"BASE_URL" default:"http://localhost:8080"`
+
+	// Slack (optional — empty disables Slack notifications)
+	SlackBotToken      string `envconfig:"SLACK_BOT_TOKEN" default:""`
+	SlackSigningSecret string `envconfig:"SLACK_SIGNING_SECRET" default:""`
+
+	// Telegram (optional — empty disables Telegram notifications)
+	TelegramBotToken    string `envconfig:"TELEGRAM_BOT_TOKEN" default:""`
+	TelegramBotUsername string `envconfig:"TELEGRAM_BOT_USERNAME" default:"valtbot"`
 }
 
 // MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.

@@ -93,7 +93,9 @@ func main() {
 	tokenStore := notify.NewActionTokenStore(pool)
 	channelStore := notify.NewChannelStore(pool)
 	channelHandler := notify.NewChannelHandler(channelStore)
-	notifySvc := notify.NewService(emailNotifier, tokenStore, cfg.BaseURL)
+	slackAdapter := notify.NewSlackAdapter(cfg.SlackBotToken)
+	telegramAdapter := notify.NewTelegramAdapter(cfg.TelegramBotToken)
+	notifySvc := notify.NewService(emailNotifier, tokenStore, cfg.BaseURL, slackAdapter, telegramAdapter, channelStore)
 
 	authHandler := auth.NewHandler(pool, jwtMgr, cfg)
 	vaultService := vault.NewService(pool, storage)
@@ -102,6 +104,8 @@ func main() {
 	workflowSvc := workflow.NewService(pool)
 	credMgr := workflow.NewCredentialManager(pool)
 	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, tokenStore, masterKey, pool)
+	slackWebhookHandler := notify.NewSlackWebhookHandler(cfg.SlackSigningSecret, workflowHandler, slackAdapter)
+	telegramWebhookHandler := notify.NewTelegramWebhookHandler(telegramAdapter, channelStore, pool, workflowHandler, cfg.TelegramBotUsername)
 
 	auditHandler := audit.NewHandler(pool)
 
@@ -172,6 +176,12 @@ func main() {
 		// Public: email action-token redemption (no JWT required)
 		r.Post("/action-tokens/{token}/redeem", workflowHandler.RedeemActionToken)
 
+		// Public: Slack interactivity callbacks (verified via HMAC-SHA256)
+		r.Post("/webhooks/slack/interactions", slackWebhookHandler.Handle)
+
+		// Public: Telegram Update callbacks (no auth — Telegram pushes to this endpoint)
+		r.Post("/webhooks/telegram", telegramWebhookHandler.Handle)
+
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware(jwtMgr))
 			r.Use(apiLimiter.Middleware())
@@ -182,6 +192,16 @@ func main() {
 			r.Get("/me/notification-channels", channelHandler.List)
 			r.Post("/me/notification-channels", channelHandler.Upsert)
 			r.Delete("/me/notification-channels/{id}", channelHandler.Delete)
+			r.Post("/me/telegram-link", func(w http.ResponseWriter, r *http.Request) {
+				userID := auth.UserIDFromContext(r.Context())
+				url, err := telegramWebhookHandler.GenerateLinkURL(r.Context(), userID)
+				if err != nil {
+					apierror.InternalError(w, "failed to generate link")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"url": url})
+			})
 			r.Mount("/secrets", vaultHandler.Routes())
 			r.Get("/access-requests", workflowHandler.ListPending)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)

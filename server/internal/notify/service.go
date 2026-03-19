@@ -13,22 +13,21 @@ type Notifier interface {
 
 // Service routes notifications through available notifiers.
 type Service struct {
-	email   Notifier
-	tokens  *ActionTokenStore
-	baseURL string
+	email    Notifier
+	tokens   *ActionTokenStore
+	baseURL  string
+	slack    *SlackAdapter
+	telegram *TelegramAdapter
+	channels *ChannelStore
 }
 
-// NewService creates a notification Service. Pass nil email for no-op mode.
-func NewService(email Notifier, tokens *ActionTokenStore, baseURL string) *Service {
-	return &Service{email: email, tokens: tokens, baseURL: baseURL}
+// NewService creates a notification Service. Pass nil adapters to disable those channels.
+func NewService(email Notifier, tokens *ActionTokenStore, baseURL string, slack *SlackAdapter, telegram *TelegramAdapter, channels *ChannelStore) *Service {
+	return &Service{email: email, tokens: tokens, baseURL: baseURL, slack: slack, telegram: telegram, channels: channels}
 }
 
-// NotifyApprovalNeeded sends an approval email with one-click approve/reject links.
-func (s *Service) NotifyApprovalNeeded(ctx context.Context, to, requestID, secretName, requester, reason string) error {
-	if s.email == nil || to == "" {
-		return nil
-	}
-
+// NotifyApprovalNeeded sends an approval email and/or Slack DM with one-click approve/reject.
+func (s *Service) NotifyApprovalNeeded(ctx context.Context, ownerUserID, to, requestID, secretName, requester, reason string) error {
 	approveToken, err := s.tokens.Create(ctx, requestID, "approve", 72*time.Hour)
 	if err != nil {
 		return fmt.Errorf("creating approve token: %w", err)
@@ -41,9 +40,34 @@ func (s *Service) NotifyApprovalNeeded(ctx context.Context, to, requestID, secre
 	approveURL := s.baseURL + "/api/v1/action-tokens/" + approveToken + "/redeem?action=approve"
 	rejectURL := s.baseURL + "/api/v1/action-tokens/" + rejectToken + "/redeem?action=reject"
 
-	subject := "Valt: Access Request Needs Your Approval"
-	body := buildApprovalEmail(secretName, requester, reason, approveURL, rejectURL)
-	return s.email.Send(ctx, to, subject, body)
+	// Email notification
+	if s.email != nil && to != "" {
+		subject := "Valt: Access Request Needs Your Approval"
+		body := buildApprovalEmail(secretName, requester, reason, approveURL, rejectURL)
+		if emailErr := s.email.Send(ctx, to, subject, body); emailErr != nil {
+			fmt.Printf("notify: email send error: %v\n", emailErr)
+		}
+	}
+
+	// Slack notification
+	if s.slack != nil && s.channels != nil && ownerUserID != "" {
+		if slackUserID, chErr := s.channels.GetPreferred(ctx, ownerUserID, "slack"); chErr == nil && slackUserID != "" {
+			_ = s.slack.SendApprovalRequest(ctx, slackUserID, requestID, secretName, requester, reason)
+		}
+	}
+
+	// Telegram notification
+	if s.telegram != nil && s.channels != nil && ownerUserID != "" {
+		if telegramHandle, chErr := s.channels.GetPreferred(ctx, ownerUserID, "telegram"); chErr == nil && telegramHandle != "" {
+			var chatID int64
+			fmt.Sscan(telegramHandle, &chatID)
+			if chatID != 0 {
+				_ = s.telegram.SendApprovalRequest(ctx, chatID, requestID, secretName, requester, reason)
+			}
+		}
+	}
+
+	return nil
 }
 
 // NotifyAccessGranted sends an access-granted notification.

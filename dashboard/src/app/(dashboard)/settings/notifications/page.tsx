@@ -45,6 +45,19 @@ export default function NotificationsPage() {
     }
   }
 
+  async function handleTelegramConnect() {
+    setLoading(true)
+    setError('')
+    try {
+      const { url } = await api.notificationChannels.telegramLink()
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to generate Telegram link')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleDelete(id: string) {
     try {
       await api.notificationChannels.delete(id)
@@ -68,7 +81,7 @@ export default function NotificationsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex gap-2">
-            <Select value={channelType} onValueChange={setChannelType}>
+            <Select value={channelType} onValueChange={v => { setChannelType(v); setHandle('') }}>
               <SelectTrigger className="w-36">
                 <SelectValue />
               </SelectTrigger>
@@ -78,16 +91,24 @@ export default function NotificationsPage() {
                 <SelectItem value="telegram">Telegram</SelectItem>
               </SelectContent>
             </Select>
-            <Input
-              placeholder={CHANNEL_LABELS[channelType]}
-              value={handle}
-              onChange={e => setHandle(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleAdd()}
-              className="flex-1"
-            />
-            <Button onClick={handleAdd} disabled={loading || !handle.trim()}>
-              {loading ? 'Saving…' : 'Save'}
-            </Button>
+            {channelType === 'telegram' ? (
+              <Button onClick={handleTelegramConnect} disabled={loading} className="flex-1">
+                {loading ? 'Opening…' : 'Connect via Telegram →'}
+              </Button>
+            ) : (
+              <>
+                <Input
+                  placeholder={CHANNEL_LABELS[channelType]}
+                  value={handle}
+                  onChange={e => setHandle(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                  className="flex-1"
+                />
+                <Button onClick={handleAdd} disabled={loading || !handle.trim()}>
+                  {loading ? 'Saving…' : 'Save'}
+                </Button>
+              </>
+            )}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>

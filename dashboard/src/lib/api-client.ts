@@ -140,6 +140,8 @@ export const api = {
       }),
     delete: (id: string) =>
       apiFetch<void>(`/me/notification-channels/${id}`, { method: 'DELETE' }),
+    telegramLink: () =>
+      apiFetch<{ url: string }>('/me/telegram-link', { method: 'POST' }),
   },
   scans: {
     list: (projectId: string) =>

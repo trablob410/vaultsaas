@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -173,7 +174,7 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		_ = h.pool.QueryRow(r.Context(),
 			`SELECT email FROM users WHERE id = $1`, secret.UserID,
 		).Scan(&ownerEmail)
-		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), ownerEmail, req.ID, secret.Name, callerDesc, body.Reason)
+		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), secret.UserID, ownerEmail, req.ID, secret.Name, callerDesc, body.Reason)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -583,6 +584,45 @@ func (h *Handler) GetActiveCredentials(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 		"credentials": items,
 	})
+}
+
+// ApproveBySystem approves a request without user auth (called from Slack/email actions).
+func (h *Handler) ApproveBySystem(ctx context.Context, requestID, actor string) error {
+	req, err := h.service.Approve(ctx, requestID, actor)
+	if err != nil {
+		return err
+	}
+	secret, _ := h.vaultSvc.GetSecretByID(ctx, req.SecretID)
+	credType := ""
+	if secret != nil {
+		credType = secret.CredentialType
+	}
+	_, issueErr := h.credMgr.IssueCredential(ctx, req.ID, credType, req.RequestedDurationMinutes)
+	if issueErr != nil {
+		log.Printf("ApproveBySystem: failed to issue credential: %v", issueErr)
+	}
+	_ = h.auditLog.Log(ctx, audit.Entry{
+		UserID:       actor,
+		Action:       "access_request.approve",
+		ResourceType: "access_request",
+		ResourceID:   requestID,
+	})
+	return nil
+}
+
+// RejectBySystem rejects a request without user auth (called from Slack/email actions).
+func (h *Handler) RejectBySystem(ctx context.Context, requestID, actor, reason string) error {
+	_, err := h.service.Reject(ctx, requestID, actor, reason)
+	if err != nil {
+		return err
+	}
+	_ = h.auditLog.Log(ctx, audit.Entry{
+		UserID:       actor,
+		Action:       "access_request.reject",
+		ResourceType: "access_request",
+		ResourceID:   requestID,
+	})
+	return nil
 }
 
 // RevokeCredential handles POST /credentials/{request_id}/revoke
