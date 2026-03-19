@@ -181,3 +181,11 @@ export interface ScanFinding {
   imported_secret_id?: string
   created_at: string
 }
+
+export interface NotificationChannel {
+  id: string
+  user_id: string
+  channel_type: 'slack' | 'telegram' | 'email'
+  handle: string
+  verified: boolean
+}

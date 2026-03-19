@@ -14,6 +14,7 @@ import type {
   ScanFinding,
   DynamicProvider,
   DynamicLease,
+  NotificationChannel,
 } from '@/types/api'
 
 const BASE = '/api/proxy'
@@ -129,6 +130,16 @@ export const api = {
       apiFetch<void>(`/leases/${leaseId}`, { method: 'DELETE' }),
     listLeases: (providerId: string) =>
       apiFetch<{ leases: DynamicLease[] }>(`/providers/${providerId}/leases`),
+  },
+  notificationChannels: {
+    list: () => apiFetch<{ channels: NotificationChannel[] }>('/me/notification-channels'),
+    upsert: (channelType: string, handle: string) =>
+      apiFetch<NotificationChannel>('/me/notification-channels', {
+        method: 'POST',
+        body: JSON.stringify({ channel_type: channelType, handle }),
+      }),
+    delete: (id: string) =>
+      apiFetch<void>(`/me/notification-channels/${id}`, { method: 'DELETE' }),
   },
   scans: {
     list: (projectId: string) =>
