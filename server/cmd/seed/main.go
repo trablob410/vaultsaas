@@ -96,8 +96,8 @@ func main() {
 	// Access requests
 	var pendingReqID, approvedReqID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO access_requests (secret_id, requester_id, requester_type, status, reason, duration)
-		 VALUES ($1, $2, 'agent', 'pending', 'CI pipeline needs AWS creds', '2 hours')
+		`INSERT INTO access_requests (secret_id, requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes)
+		 VALUES ($1, $2, 'human', NULL, 'pending', 'CI pipeline needs AWS creds', 120)
 		 RETURNING id`,
 		secretIDs[0], devID,
 	).Scan(&pendingReqID)
@@ -107,8 +107,8 @@ func main() {
 
 	now := time.Now().UTC()
 	err = tx.QueryRow(ctx,
-		`INSERT INTO access_requests (secret_id, requester_id, requester_type, status, reason, duration, decided_by, decided_at, expires_at)
-		 VALUES ($1, $2, 'agent', 'approved', 'Deploy script needs DB creds', '1 hour', $3, $4, $5)
+		`INSERT INTO access_requests (secret_id, requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at)
+		 VALUES ($1, $2, 'human', NULL, 'approved', 'Deploy script needs DB creds', 60, $3, $4, $5)
 		 RETURNING id`,
 		secretIDs[1], devID, adminID, now, now.Add(1*time.Hour),
 	).Scan(&approvedReqID)
@@ -140,8 +140,8 @@ func main() {
 	}
 	for _, e := range auditEntries {
 		_, err = tx.Exec(ctx,
-			`INSERT INTO audit_logs (actor_id, action, resource, resource_id, metadata)
-			 VALUES ($1, $2, $3, $4, '{}')`,
+			`INSERT INTO audit_logs (user_id, action, resource_type, resource_id, event_type, status, metadata)
+			 VALUES ($1, $2, $3, $4, 'action', 'success', '{}')`,
 			e.actorID, e.action, e.resource, e.resourceID,
 		)
 		if err != nil {
