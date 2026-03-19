@@ -1,0 +1,2 @@
+ALTER TABLE secrets  ADD COLUMN IF NOT EXISTS policy_config JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS policy_config JSONB;

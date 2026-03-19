@@ -42,17 +42,22 @@ type CreateRequestInput struct {
 
 // Service handles the approval workflow.
 type Service struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	resolver *policy.Resolver
 }
 
 // NewService creates a workflow Service.
 func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+	return &Service{pool: pool, resolver: policy.NewResolver(pool)}
 }
 
 // CreateRequest creates a new access request, enforcing policy.
 func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (*AccessRequest, error) {
-	p := policy.ForCredentialType(input.CredentialType)
+	p, _, err := s.resolver.Resolve(ctx, input.SecretID, input.CredentialType)
+	if err != nil {
+		// Fall back to tier defaults on resolver error (e.g. secret not found yet)
+		p = policy.ForCredentialType(input.CredentialType)
+	}
 
 	// Enforce reason requirements
 	if p.RequireReason && len(input.Reason) < p.MinReasonLength {
