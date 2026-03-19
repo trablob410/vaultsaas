@@ -131,6 +131,20 @@ export const api = {
     listLeases: (providerId: string) =>
       apiFetch<{ leases: DynamicLease[] }>(`/providers/${providerId}/leases`),
   },
+  policy: {
+    getSecret: (secretId: string) => apiFetch<Record<string, unknown>>(`/secrets/${secretId}/policy`),
+    putSecret: (secretId: string, policy: Record<string, unknown>) =>
+      apiFetch<Record<string, unknown>>(`/secrets/${secretId}/policy`, {
+        method: 'PUT',
+        body: JSON.stringify(policy),
+      }),
+    getProject: (projectId: string) => apiFetch<Record<string, unknown>>(`/projects/${projectId}/policy`),
+    putProject: (projectId: string, policy: Record<string, unknown>) =>
+      apiFetch<Record<string, unknown>>(`/projects/${projectId}/policy`, {
+        method: 'PUT',
+        body: JSON.stringify(policy),
+      }),
+  },
   notificationChannels: {
     list: () => apiFetch<{ channels: NotificationChannel[] }>('/me/notification-channels'),
     upsert: (channelType: string, handle: string) =>
