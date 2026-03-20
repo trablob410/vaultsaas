@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown, ScanLine, Database, Zap } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown, ScanLine, Database, Zap, ShieldCheck, Layers, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -12,6 +13,7 @@ const navItems = [
   { href: '/agents', label: 'Agents', icon: Bot },
   { href: '/scans', label: 'Scanner', icon: ScanLine },
   { href: '/providers', label: 'Providers', icon: Database },
+  { href: '/projects', label: 'Projects', icon: FolderOpen },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
@@ -22,6 +24,30 @@ async function handleLogout() {
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const [policyHref, setPolicyHref] = useState('/projects')
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null)
+
+  useEffect(() => {
+    const updateHref = () => {
+      const pid = localStorage.getItem('valt_current_project')
+      setPolicyHref(pid ? `/projects/${pid}/policies` : '/projects')
+
+      const wsId = localStorage.getItem('valt_current_workspace')
+      const wsName = localStorage.getItem('valt_current_workspace_name')
+      setWorkspaceName(wsId ? (wsName || 'Workspace selected') : null)
+    }
+    updateHref()
+    window.addEventListener('storage', updateHref)
+    window.addEventListener('valt:project-changed', updateHref)
+    window.addEventListener('valt:workspace-changed', updateHref)
+    return () => {
+      window.removeEventListener('storage', updateHref)
+      window.removeEventListener('valt:project-changed', updateHref)
+      window.removeEventListener('valt:workspace-changed', updateHref)
+    }
+  }, [])
+
+  const links = [...navItems, { href: policyHref, label: 'Policies', icon: ShieldCheck }]
 
   return (
     <aside className="flex flex-col w-60 border-r bg-card shrink-0">
@@ -32,26 +58,38 @@ export default function Sidebar() {
         <span className="font-semibold text-sm">Valt</span>
       </div>
 
-      {/* Org context */}
-      <div className="px-3 py-2 border-b">
-        <button
-          onClick={() => { window.location.href = '/orgs' }}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      {/* Org/Workspace context */}
+      <div className="px-3 py-3 border-b space-y-1">
+        <Link
+          href="/orgs"
+          className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Building2 className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate font-medium">Organizations</span>
-          <ChevronDown className="w-3 h-3 ml-auto shrink-0" />
-        </button>
+          <Building2 className="w-4 h-4 shrink-0" />
+          <span className="truncate flex-1 text-left">Organizations</span>
+          <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-50" />
+        </Link>
+        
+        {workspaceName ? (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm font-semibold bg-accent/50 text-foreground">
+            <Layers className="w-4 h-4 shrink-0 text-primary" />
+            <span className="truncate">{workspaceName}</span>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2 px-2 py-2 mt-1 rounded-md text-xs bg-amber-500/10 text-amber-600 border border-amber-500/20">
+            <Layers className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="leading-tight">No workspace selected. Go to Organizations to pick one.</span>
+          </div>
+        )}
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
-        {navItems.map(({ href, label, icon: Icon }) => (
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        {links.map(({ href, label, icon: Icon }) => (
           <Link
-            key={href}
+            key={`${href}-${label}`}
             href={href}
             className={cn(
               'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
-              pathname.startsWith(href)
+              (label === 'Policies' ? pathname.includes('/policies') : pathname.startsWith(href))
                 ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
@@ -72,7 +110,7 @@ export default function Sidebar() {
         </Link>
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-full"
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-full text-left"
         >
           <LogOut className="w-4 h-4 shrink-0" />
           Sign out

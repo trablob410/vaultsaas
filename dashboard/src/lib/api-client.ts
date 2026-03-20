@@ -14,9 +14,16 @@ import type {
   ScanFinding,
   DynamicProvider,
   DynamicLease,
+  PolicyParameters,
+  PolicyTemplate,
+  PolicyTemplateVersion,
+  SecretPolicyBinding,
 } from '@/types/api'
 
 const BASE = '/api/proxy'
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); this.name = 'ApiError' }
+}
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -29,7 +36,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error((err as { error?: string }).error ?? 'Request failed')
+    throw new ApiError((err as { error?: string }).error ?? 'Request failed', res.status)
   }
   return res.json() as Promise<T>
 }
@@ -69,7 +76,10 @@ export const api = {
     },
   },
   orgs: {
-    list: () => apiFetch<{ orgs: Organization[] }>('/orgs'),
+    list: async () => {
+      const data = await apiFetch<{ orgs: Organization[] } | Organization[]>('/orgs')
+      return Array.isArray(data) ? { orgs: data } : { orgs: data.orgs ?? [] }
+    },
     create: (body: { name: string; slug: string }) =>
       apiFetch<Organization>('/orgs', { method: 'POST', body: JSON.stringify(body) }),
     getMembers: (orgId: string) =>
@@ -78,14 +88,18 @@ export const api = {
       apiFetch<OrgMembership>(`/orgs/${orgId}/members`, { method: 'POST', body: JSON.stringify(body) }),
   },
   workspaces: {
-    list: (orgId: string) =>
-      apiFetch<{ workspaces: Workspace[] }>(`/orgs/${orgId}/workspaces`),
+    list: async (orgId: string) => {
+      const data = await apiFetch<{ workspaces: Workspace[] } | Workspace[]>(`/orgs/${orgId}/workspaces`)
+      return Array.isArray(data) ? { workspaces: data } : { workspaces: data.workspaces ?? [] }
+    },
     create: (orgId: string, body: { name: string; slug: string }) =>
       apiFetch<Workspace>(`/orgs/${orgId}/workspaces`, { method: 'POST', body: JSON.stringify(body) }),
   },
   projects: {
-    list: (workspaceId: string) =>
-      apiFetch<{ projects: Project[] }>(`/workspaces/${workspaceId}/projects`),
+    list: async (workspaceId: string) => {
+      const data = await apiFetch<{ projects: Project[] } | Project[]>(`/workspaces/${workspaceId}/projects`)
+      return Array.isArray(data) ? { projects: data } : { projects: data.projects ?? [] }
+    },
     create: (workspaceId: string, body: { name: string; slug: string }) =>
       apiFetch<Project>(`/workspaces/${workspaceId}/projects`, { method: 'POST', body: JSON.stringify(body) }),
     getMembers: (projectId: string) =>
@@ -142,5 +156,46 @@ export const api = {
       }),
     dismissFinding: (scanId: string, findingId: string) =>
       apiFetch<void>(`/scans/${scanId}/findings/${findingId}/dismiss`, { method: 'POST' }),
+  },
+  policies: {
+    listTemplates: (projectId: string) =>
+      apiFetch<{ templates: PolicyTemplate[] }>(`/projects/${projectId}/policy-templates`),
+    createTemplate: (
+      projectId: string,
+      body: {
+        name: string
+        description: string
+        base_credential_type?: string
+        parameters: PolicyParameters
+      }
+    ) => apiFetch<PolicyTemplate>(`/projects/${projectId}/policy-templates`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+    getTemplate: (templateId: string) =>
+      apiFetch<PolicyTemplate>(`/policy-templates/${templateId}`),
+    updateTemplate: (
+      templateId: string,
+      body: { parameters: PolicyParameters; change_note: string }
+    ) => apiFetch<PolicyTemplateVersion>(`/policy-templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+    cloneTemplate: (templateId: string, name: string) =>
+      apiFetch<PolicyTemplate>(`/policy-templates/${templateId}/clone`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    listVersions: (templateId: string) =>
+      apiFetch<{ versions: PolicyTemplateVersion[] }>(`/policy-templates/${templateId}/versions`),
+    getBinding: (secretId: string) =>
+      apiFetch<SecretPolicyBinding>(`/secrets/${secretId}/policy-binding`),
+    updateBinding: (
+      secretId: string,
+      body: { template_id: string; template_version: number; override_parameters?: Record<string, unknown> }
+    ) => apiFetch<SecretPolicyBinding>(`/secrets/${secretId}/policy-binding`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   },
 }

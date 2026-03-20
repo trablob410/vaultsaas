@@ -156,4 +156,71 @@ describe('api client', () => {
       )
     })
   })
+
+  describe('policies API', () => {
+    it('calls list templates endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ templates: [] }),
+      })
+      await api.policies.listTemplates('p1')
+      expect(mockFetch).toHaveBeenCalledWith('/api/proxy/projects/p1/policy-templates', expect.any(Object))
+    })
+
+    it('calls update binding endpoint with put payload', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ secret_id: 's1' }),
+      })
+      await api.policies.updateBinding('s1', {
+        template_id: 't1',
+        template_version: 2,
+        override_parameters: { max_duration_minutes: 30 },
+      })
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/proxy/secrets/s1/policy-binding',
+        expect.objectContaining({ method: 'PUT' })
+      )
+    })
+  })
+
+  describe('workspace/project list response shapes', () => {
+    it('normalizes array response for workspaces.list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ id: 'w1', name: 'ws' }],
+      })
+
+      const result = await api.workspaces.list('o1')
+      expect(result.workspaces).toHaveLength(1)
+      expect(result.workspaces[0].id).toBe('w1')
+    })
+
+    it('normalizes object response for workspaces.list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ workspaces: [{ id: 'w2', name: 'ws2' }] }),
+      })
+
+      const result = await api.workspaces.list('o1')
+      expect(result.workspaces).toHaveLength(1)
+      expect(result.workspaces[0].id).toBe('w2')
+    })
+
+    it('normalizes array response for projects.list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ id: 'p1', name: 'proj' }],
+      })
+
+      const result = await api.projects.list('w1')
+      expect(result.projects).toHaveLength(1)
+      expect(result.projects[0].id).toBe('p1')
+    })
+  })
 })

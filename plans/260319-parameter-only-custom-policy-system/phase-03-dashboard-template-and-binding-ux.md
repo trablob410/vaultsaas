@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P2
-- **Status:** pending
+- **Status:** partial
 - **Description:** Add policy template management UI and secret policy binding UX with effective policy preview and weaker warnings.
 
 ## Goals
@@ -43,12 +43,12 @@
 5. Add dashboard tests for key flows and payload integrity.
 
 ## Todo List
-- [ ] Add policy models and API client methods
-- [ ] Add policies page under project scope
-- [ ] Add template version history UX
-- [ ] Add secret binding form section + preview
-- [ ] Add weaker override warning UX
-- [ ] Add dashboard tests for templates + binding flows
+- [x] Add policy models and API client methods
+- [x] Add policies page under project scope
+- [x] Add template version history UX
+- [x] Add secret binding form section + preview
+- [x] Add weaker override warning UX
+- [x] Add dashboard tests for templates + binding flows
 
 ## Success Criteria
 1. User can create/clone/edit template and see version history.

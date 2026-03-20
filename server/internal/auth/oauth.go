@@ -12,14 +12,20 @@ import (
 )
 
 type googleUserInfo struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	Name        string `json:"name"`
-	Picture     string `json:"picture"`
-	VerifiedEmail bool  `json:"verified_email"`
+	ID            string `json:"id"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	Picture       string `json:"picture"`
+	VerifiedEmail bool   `json:"verified_email"`
 }
 
 func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
+	if h.oauthConfig == nil || h.oauthConfig.ClientID == "" || h.oauthConfig.ClientSecret == "" || h.oauthConfig.RedirectURL == "" {
+		log.Printf("oauth: google auth not configured (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REDIRECT_URL)")
+		http.Error(w, "google oauth is not configured on server", http.StatusServiceUnavailable)
+		return
+	}
+
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		log.Printf("oauth: generate state: %v", err)
@@ -42,6 +48,12 @@ func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) googleCallback(w http.ResponseWriter, r *http.Request) {
+	if h.oauthConfig == nil || h.oauthConfig.ClientID == "" || h.oauthConfig.ClientSecret == "" || h.oauthConfig.RedirectURL == "" {
+		log.Printf("oauth: callback rejected because google auth not configured")
+		http.Error(w, "google oauth is not configured on server", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Verify state cookie
 	stateCookie, err := r.Cookie("oauth_state")
 	if err != nil || stateCookie.Value != r.URL.Query().Get("state") {

@@ -9,6 +9,13 @@ export interface Secret {
   created_at: string
   updated_at: string
 }
+export type {
+  PolicyParameters,
+  PolicyTemplate,
+  PolicyTemplateVersion,
+  PolicyTemplateRef,
+  SecretPolicyBinding,
+} from './policy'
 
 export interface AccessRequest {
   id: string

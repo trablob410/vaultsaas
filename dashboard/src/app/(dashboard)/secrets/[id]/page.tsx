@@ -1,9 +1,10 @@
 import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { formatDate } from '@/lib/utils'
-import type { Secret } from '@/types/api'
+import type { Secret, SecretPolicyBinding } from '@/types/api'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { POLICY_LABELS } from '@/components/policies/policy-helpers'
 
 async function getSecret(id: string): Promise<Secret | null> {
   const cookieStore = await cookies()
@@ -18,9 +19,23 @@ async function getSecret(id: string): Promise<Secret | null> {
   return res.json() as Promise<Secret>
 }
 
+async function getPolicyBinding(id: string): Promise<SecretPolicyBinding | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get('valt_access_token')?.value
+  if (!token) return null
+  const backend = process.env.BACKEND_URL ?? 'http://localhost:8080'
+  const res = await fetch(`${backend}/api/v1/secrets/${id}/policy-binding`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  })
+  if (!res.ok) return null
+  return res.json() as Promise<SecretPolicyBinding>
+}
+
 export default async function SecretDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const secret = await getSecret(id)
+  const binding = await getPolicyBinding(id)
   if (!secret) notFound()
 
   return (
@@ -45,6 +60,34 @@ export default async function SecretDetailPage({ params }: { params: Promise<{ i
           <div><span className="text-muted-foreground">Updated: </span>{formatDate(secret.updated_at)}</div>
         </CardContent>
       </Card>
+      {binding && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Policy binding</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {binding.template ? (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Template:</span>
+                <Badge variant="secondary">{binding.template.name}</Badge>
+                <Badge variant="outline">v{binding.template_version}</Badge>
+              </div>
+            ) : (
+              <p className="text-muted-foreground">No template bound.</p>
+            )}
+            {binding.override_warnings.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-amber-700 dark:text-amber-300">Weaker override warnings</p>
+                <div className="flex flex-wrap gap-1">
+                  {binding.override_warnings.map((w) => (
+                    <Badge key={w} variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-300">
+                      {POLICY_LABELS[w.replace('weaker:', '') as keyof typeof POLICY_LABELS] ?? w}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
