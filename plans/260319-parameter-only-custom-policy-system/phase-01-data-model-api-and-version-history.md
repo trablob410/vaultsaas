@@ -48,7 +48,7 @@
 - [x] Implement binding APIs with warning return payload
 - [x] Implement agent permission grant/revoke APIs
 - [x] Seed system templates
-- [ ] Integration tests for all policy APIs
+- [x] Integration tests for all policy APIs
 
 ## Latest Code Review (2026-03-20)
 
