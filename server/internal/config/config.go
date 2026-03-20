@@ -51,6 +51,9 @@ type Config struct {
 
 	// Redis (optional — empty disables Redis-backed features)
 	RedisURL string `envconfig:"REDIS_URL" default:""`
+
+	// Policy enforcement rollout
+	PolicyEnforcementV2Enabled bool `envconfig:"POLICY_ENFORCEMENT_V2_ENABLED" default:"false"`
 }
 
 // MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.

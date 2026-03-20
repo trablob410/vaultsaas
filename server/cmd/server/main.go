@@ -97,7 +97,7 @@ func main() {
 	vaultService := vault.NewService(pool, storage)
 	vaultHandler := vault.NewHandler(vaultService, masterKey)
 
-	workflowSvc := workflow.NewService(pool)
+	workflowSvc := workflow.NewService(pool, cfg.PolicyEnforcementV2Enabled)
 	credMgr := workflow.NewCredentialManager(pool)
 	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, masterKey, pool)
 

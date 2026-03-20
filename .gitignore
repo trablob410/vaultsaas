@@ -51,3 +51,5 @@ caddy-config/
 plans/*/reports/*.md
 !plans/*/plan.md
 !plans/*/phase-*.md
+
+.claude/
