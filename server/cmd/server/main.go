@@ -26,6 +26,7 @@ import (
 	custommiddleware "github.com/valt-dev/valt/server/internal/middleware"
 	"github.com/valt-dev/valt/server/internal/notify"
 	"github.com/valt-dev/valt/server/internal/org"
+	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/internal/project"
 	"github.com/valt-dev/valt/server/internal/ratelimit"
 	"github.com/valt-dev/valt/server/internal/scanner"
@@ -113,6 +114,8 @@ func main() {
 	projectHandler := project.NewHandler(projectSvc)
 	agentSvc := agent.NewService(pool)
 	agentHandler := agent.NewHandler(agentSvc)
+	policySvc := policy.NewService(pool)
+	policyHandler := policy.NewHandler(policySvc)
 	scannerSvc := scanner.NewService(pool)
 	scannerHandler := scanner.NewHandler(scannerSvc, pool)
 	dynSvc := dynsecret.NewService(pool, masterKey)
@@ -183,6 +186,7 @@ func main() {
 			r.Mount("/orgs/{org_id}/workspaces", workspaceHandler.Routes())
 			projectHandler.RegisterRoutes(r)
 			agentHandler.RegisterRoutes(r)
+			policyHandler.RegisterRoutes(r)
 			scannerHandler.RegisterRoutes(r)
 			dynHandler.RegisterRoutes(r)
 			usageHandler.RegisterRoutes(r)

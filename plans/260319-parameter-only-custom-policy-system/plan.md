@@ -163,7 +163,7 @@ Rule: no direct policy checks outside resolver + these workflow gates.
 
 ## Existing table use
 
-- keep `secrets.policy` as backward-compat mirror for phase migration only.
+- keep `secrets.policy` as backward-compatible mirror for phase migration only.
 - v1 write both places during migration window (short-term dual write), then deprecate reads from `secrets.policy`.
 
 ## Access request snapshot (v1 policy history)
@@ -369,6 +369,23 @@ Phase docs:
 - template CRUD + clone APIs
 - binding read/write API
 - seed system templates
+
+### Phase 1 current status update (2026-03-20)
+
+- **Implementation progress:** core schema + API scaffolding implemented in `server/internal/policy` and migration `000026` added.
+- **Review state:** completed code review; phase remains open pending hardening/test closure.
+- **Key blockers to close Phase 1:**
+  1. Resolve `/secrets` route overlap risk for policy-binding and policy-agent-permission endpoints.
+  2. ~~Normalize policy validation errors to return `400 bad_request` instead of internal error paths.~~ ✅ done (2026-03-20)
+  3. Harden concurrency behavior for template versioning and permission grant/revoke.
+  4. Add integration tests for all Phase 1 policy APIs.
+
+### Phase 1 maintainability update (2026-03-20)
+
+- `server/internal/policy` was consolidated from many micro-files into concern-based files:
+  - `handler.go`, `service.go`, `repository.go`, `models.go`, `errors.go`.
+- No behavior expansion; structural simplification only for scanability and maintainability.
+
 
 ## Phase 2 — Workflow enforcement switch (3h)
 

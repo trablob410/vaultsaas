@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P1
-- **Status:** pending
+- **Status:** in-review
 - **Description:** Add policy templates, template versions, secret bindings, agent policy-read permissions, and API endpoints.
 
 ## Goals
@@ -42,13 +42,46 @@
 6. Add integration tests for CRUD/version/binding/permission behavior.
 
 ## Todo List
-- [ ] Add migrations for new policy tables
-- [ ] Add migration for `access_requests` policy snapshot columns
-- [ ] Implement template APIs with version-on-edit behavior
-- [ ] Implement binding APIs with warning return payload
-- [ ] Implement agent permission grant/revoke APIs
-- [ ] Seed system templates
+- [x] Add migrations for new policy tables
+- [x] Add migration for `access_requests` policy snapshot columns
+- [x] Implement template APIs with version-on-edit behavior
+- [x] Implement binding APIs with warning return payload
+- [x] Implement agent permission grant/revoke APIs
+- [x] Seed system templates
 - [ ] Integration tests for all policy APIs
+
+## Latest Code Review (2026-03-20)
+
+### Review Status
+- Review completed for Phase 01 implementation in `server/internal/policy`, migration `000026`, and route wiring in `server/cmd/server/main.go`.
+- Outcome: **needs hardening before phase closure**.
+
+### Findings
+1. **Critical:** Route overlap risk for `/secrets/{secret_id}/policy-*` endpoints due to `/secrets` mount ordering.
+2. **High:** Invalid override payloads may surface as 500 instead of 400 in some resolver/repository paths.
+3. **High:** Concurrency risk in template version creation (`MAX(version)+1`) and permission grant (revoke-then-insert).
+4. **High:** Integration tests for policy APIs are still missing.
+5. **Medium:** Seed idempotency edge case when template name conflicts with non-system template.
+6. **Medium:** Binding does not enforce `base_credential_type` compatibility with secret credential type.
+
+### Follow-up Tasks (from review)
+- [ ] Add route-level integration test to verify policy endpoints are reachable under current router structure
+- [x] Normalize validation failures to `ErrPolicyInvalid` (return 400 for invalid override/type/key cases)
+- [ ] Make template version creation concurrency-safe (transaction/lock or retry on conflict)
+- [ ] Make permission grant flow atomic and race-safe
+- [ ] Add integration tests for template CRUD/version/binding/permission endpoints
+- [ ] Decide and implement `base_credential_type` compatibility enforcement at binding time
+
+## Phase 01 Module Structure Update (2026-03-20)
+
+- Refactored `server/internal/policy` to reduce over-splitting and keep separation by concern.
+- Consolidated implementation into:
+  - `service.go` (all service/use-case logic)
+  - `repository.go` (all repository/query/scan logic)
+  - `handler.go` (all API handlers + request DTOs + response helpers)
+  - plus `models.go` and `errors.go`
+- Removed micro-split files for template/binding/permission service/repository/handler fragments.
+- Handler input validation paths were unified to consistently map malformed payloads/route params to `ErrPolicyInvalid`.
 
 ## Success Criteria
 1. Editing template creates new version row, old versions preserved.
