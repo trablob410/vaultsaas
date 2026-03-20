@@ -12,7 +12,6 @@ import (
 	"github.com/valt-dev/valt/server/internal/audit"
 	"github.com/valt-dev/valt/server/internal/auth"
 	"github.com/valt-dev/valt/server/internal/notify"
-	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/internal/vault"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 	"github.com/valt-dev/valt/server/pkg/crypto"
@@ -163,8 +162,8 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Notify if policy requires it
-	p := policy.ForCredentialType(secret.CredentialType)
+	// Notify using immutable request-time policy snapshot
+	p := h.service.EffectivePolicyForRequest(r.Context(), req.ID, secret.CredentialType)
 	if p.NotifyOnAccess && h.notifySvc != nil {
 		_ = h.notifySvc.NotifyApprovalNeeded(r.Context(), "", secret.Name, callerDesc, body.Reason)
 	}
@@ -422,7 +421,7 @@ func (h *Handler) GetCredential(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-revoke if single-use
 	if secret != nil {
-		p := policy.ForCredentialType(secret.CredentialType)
+		p := h.service.EffectivePolicyForRequest(r.Context(), requestID, secret.CredentialType)
 		_ = h.credMgr.AutoRevokeIfSingleUse(r.Context(), requestID, p.SingleUse)
 	}
 

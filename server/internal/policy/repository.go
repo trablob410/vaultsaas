@@ -30,6 +30,14 @@ type SecretContext struct {
 	SecretDeletedAt *string
 }
 
+type RuntimeEffectivePolicy struct {
+	Parameters      PolicyParameters
+	TemplateID      *string
+	TemplateVersion *int
+	Warnings        []string
+	Source          string
+}
+
 type bindingRow struct {
 	SecretID         string
 	TemplateID       string
@@ -643,4 +651,70 @@ func (r *Repository) EnsureSystemTemplate(ctx context.Context, projectID, name, 
 		return fmt.Errorf("commit ensure system template tx: %w", err)
 	}
 	return nil
+}
+
+func (r *Repository) ResolveRuntimePolicyBySecretID(ctx context.Context, secretID string) (*RuntimeEffectivePolicy, error) {
+	secret, err := r.GetSecretContext(ctx, secretID)
+	if err != nil {
+		return nil, err
+	}
+
+	row := r.pool.QueryRow(ctx, `
+		SELECT b.template_id, b.template_version, v.parameters, b.override_parameters, b.override_warnings
+		FROM secret_policy_bindings b
+		JOIN policy_template_versions v ON v.template_id = b.template_id AND v.version = b.template_version
+		WHERE b.secret_id = $1`, secretID)
+
+	var templateID string
+	var templateVersion int
+	var templateRaw []byte
+	var overrideRaw []byte
+	var warningsRaw []byte
+	err = row.Scan(&templateID, &templateVersion, &templateRaw, &overrideRaw, &warningsRaw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			ObserveResolution(PolicySourceDefault, "ok", nil)
+			defaults := DefaultParametersForCredentialType(secret.CredentialType)
+			return &RuntimeEffectivePolicy{
+				Parameters: defaults,
+				Warnings:   []string{},
+				Source:     PolicySourceDefault,
+			}, nil
+		}
+		ObserveResolution(PolicySourceDefault, "runtime_query_failed", nil)
+		return nil, fmt.Errorf("resolve runtime policy binding: %w", err)
+	}
+
+	tpl, err := unmarshalParameters(templateRaw)
+	if err != nil {
+		ObserveResolution(PolicySourceTemplate, "runtime_decode_failed", nil)
+		return nil, fmt.Errorf("decode runtime template parameters: %w", err)
+	}
+	override, err := unmarshalOverride(overrideRaw)
+	if err != nil {
+		ObserveResolution(PolicySourceTemplate, "runtime_decode_failed", nil)
+		return nil, fmt.Errorf("decode runtime override parameters: %w", err)
+	}
+	warnings, err := unmarshalStringList(warningsRaw)
+	if err != nil {
+		ObserveResolution(PolicySourceTemplate, "runtime_decode_failed", nil)
+		return nil, fmt.Errorf("decode runtime warnings: %w", err)
+	}
+
+	effective, resolvedWarnings, err := ResolveEffectivePolicy(tpl, override)
+	if err != nil {
+		ObserveResolution(sourceForBinding(override), "runtime_resolve_failed", nil)
+		return nil, fmt.Errorf("resolve runtime effective policy: %w", err)
+	}
+	if len(warnings) == 0 {
+		warnings = resolvedWarnings
+	}
+
+	return &RuntimeEffectivePolicy{
+		Parameters:      effective,
+		TemplateID:      &templateID,
+		TemplateVersion: &templateVersion,
+		Warnings:        warnings,
+		Source:          sourceForBinding(override),
+	}, nil
 }
