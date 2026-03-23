@@ -33,6 +33,7 @@ type CreateSecretInput struct {
 	Description    string `json:"description"`
 	CredentialType string `json:"credential_type"`
 	Source         string `json:"source"`
+	ProjectID      string `json:"project_id"`
 	EncryptedBlob  []byte `json:"encrypted_blob"`
 	EncryptedDEK   []byte `json:"encrypted_dek"`
 	Policy         string `json:"policy"`
@@ -81,11 +82,11 @@ func (s *Service) CreateSecret(ctx context.Context, userID string, input CreateS
 	storageKey := crypto.StorageKey(userID, "tmp")
 
 	err = tx.QueryRow(ctx,
-		`INSERT INTO secrets (user_id, name, description, storage_key, encrypted_dek, policy, credential_type, source)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		 RETURNING id, user_id, name, description, storage_key, policy, credential_type, source, version, created_at, updated_at`,
-		userID, input.Name, input.Description, storageKey, input.EncryptedDEK, policy, credType, input.Source,
-	).Scan(&secret.ID, &secret.UserID, &secret.Name, &secret.Description,
+		`INSERT INTO secrets (user_id, project_id, name, description, storage_key, encrypted_dek, policy, credential_type, source)
+		 VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9)
+		 RETURNING id, user_id, project_id, name, description, storage_key, policy, credential_type, source, version, created_at, updated_at`,
+		userID, input.ProjectID, input.Name, input.Description, storageKey, input.EncryptedDEK, policy, credType, input.Source,
+	).Scan(&secret.ID, &secret.UserID, &secret.ProjectID, &secret.Name, &secret.Description,
 		&secret.StorageKey, &secret.Policy, &secret.CredentialType, &secret.Source, &secret.Version,
 		&secret.CreatedAt, &secret.UpdatedAt)
 	if err != nil {

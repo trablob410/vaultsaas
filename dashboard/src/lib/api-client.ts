@@ -45,7 +45,7 @@ export const api = {
   secrets: {
     list: () => apiFetch<{ secrets: Secret[] }>('/secrets'),
     get: (id: string) => apiFetch<Secret>(`/secrets/${id}`),
-    create: (body: Partial<Secret> & { value: string }) =>
+    create: (body: Partial<Secret> & { value: string; project_id?: string }) =>
       apiFetch<Secret>('/secrets', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: string, body: Partial<Secret>) =>
       apiFetch<Secret>(`/secrets/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
