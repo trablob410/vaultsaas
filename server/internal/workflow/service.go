@@ -230,7 +230,7 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 			applied_policy, applied_template_id, applied_template_version, applied_policy_source, applied_policy_warnings
 		)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb)
-		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
+		 RETURNING id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		input.SecretID, requesterUserID, input.RequesterType, aiAgentID,
 		initialStatus, input.Reason, dur,
 		appliedRaw, effective.templateID, effective.templateVersion, effective.source, warningsRaw,
@@ -264,7 +264,7 @@ func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, l
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT ar.id, ar.secret_id, COALESCE(s.name, '') AS secret_name,
-		        COALESCE(ar.requester_user_id, '') AS requester_user_id, ar.requester_type, ar.ai_agent_id,
+		        COALESCE(ar.requester_user_id::text, '') AS requester_user_id, ar.requester_type, ar.ai_agent_id,
 		        ar.status, ar.reason, ar.requested_duration_minutes, ar.decided_by, ar.decided_at, ar.expires_at, ar.created_at
 		 FROM access_requests ar
 		 JOIN secrets s ON s.id = ar.secret_id AND s.user_id = $1 AND s.deleted_at IS NULL
@@ -302,7 +302,7 @@ func (s *Service) Approve(ctx context.Context, requestID, approverUserID string)
 		 SET status = 'approved', decided_by = $1, decided_at = NOW(),
 		     expires_at = NOW() + (requested_duration_minutes || ' minutes')::INTERVAL
 		 WHERE id = $2 AND status = 'pending'
-		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
+		 RETURNING id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		           requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		approverUserID, requestID,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
@@ -324,7 +324,7 @@ func (s *Service) Reject(ctx context.Context, requestID, approverUserID, rejecti
 		`UPDATE access_requests
 		 SET status = 'rejected', decided_by = $1, decided_at = NOW(), rejection_reason = $3
 		 WHERE id = $2 AND status = 'pending'
-		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
+		 RETURNING id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		           rejection_reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		approverUserID, requestID, rejectionReason,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
@@ -355,7 +355,7 @@ func (s *Service) IsAssignedApprover(ctx context.Context, requestID, userID stri
 func (s *Service) GetRequestByID(ctx context.Context, requestID string) (*AccessRequest, error) {
 	var req AccessRequest
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
+		`SELECT id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		        rejection_reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at
 		 FROM access_requests WHERE id = $1`,
 		requestID,
