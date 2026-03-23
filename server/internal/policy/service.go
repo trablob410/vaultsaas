@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/valt-dev/valt/server/internal/rbac"
@@ -202,6 +203,7 @@ func (s *Service) UpdateBinding(ctx context.Context, secretID, userID, templateI
 		return nil, err
 	}
 	if secret.ProjectID == nil || tpl.ProjectID != *secret.ProjectID {
+		log.Printf("Forbidden because mismatch project")
 		return nil, ErrPolicyForbidden
 	}
 	allowed, err := s.repo.CanProject(ctx, tpl.ProjectID, userID, rbac.ResourceSecret, rbac.ActionWrite)
@@ -209,6 +211,7 @@ func (s *Service) UpdateBinding(ctx context.Context, secretID, userID, templateI
 		return nil, err
 	}
 	if !allowed {
+		log.Printf("Forbidden because user cannot write to project")
 		return nil, ErrPolicyForbidden
 	}
 	if _, err := s.repo.GetTemplateVersion(ctx, templateID, templateVersion); err != nil {

@@ -48,6 +48,7 @@ type createSecretRequest struct {
 	Description    string `json:"description"`
 	CredentialType string `json:"credential_type"`
 	Source         string `json:"source"`
+	ProjectID      string `json:"project_id"`
 	Value          string `json:"value"`          // plaintext (server encrypts)
 	EncryptedBlob  string `json:"encrypted_blob"` // base64 (pre-encrypted, backward compat)
 	EncryptedDEK   string `json:"encrypted_dek"`  // base64 (pre-encrypted, backward compat)
@@ -71,6 +72,13 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 	if req.CredentialType != "" && !validCredentialTypes[req.CredentialType] {
 		apierror.BadRequest(w, "invalid credential_type")
 		return
+	}
+
+	if req.ProjectID != "" {
+		if _, err := validator.ValidateUUID(req.ProjectID); err != nil {
+			apierror.BadRequest(w, "invalid project_id")
+			return
+		}
 	}
 
 	var blob, dek []byte
@@ -122,6 +130,7 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 		CredentialType: req.CredentialType,
 		Source:         req.Source,
+		ProjectID:      req.ProjectID,
 		EncryptedBlob:  blob,
 		EncryptedDEK:   dek,
 		Policy:         req.Policy,
