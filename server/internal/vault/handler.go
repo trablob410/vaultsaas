@@ -35,11 +35,11 @@ func NewHandler(service *Service, masterKey []byte) *Handler {
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Post("/", h.createSecret)
-	r.Get("/", h.listSecrets)
-	r.Get("/{id}", h.getSecret)
-	r.Put("/{id}", h.updateSecret)
-	r.Delete("/{id}", h.deleteSecret)
+	r.Post("/", h.CreateSecret)
+	r.Get("/", h.ListSecrets)
+	r.Get("/{id}", h.GetSecret)
+	r.Put("/{id}", h.UpdateSecret)
+	r.Delete("/{id}", h.DeleteSecret)
 	return r
 }
 
@@ -55,7 +55,7 @@ type createSecretRequest struct {
 	Policy         string `json:"policy"`
 }
 
-func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 
 	var req createSecretRequest
@@ -146,7 +146,7 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(secret)
 }
 
-func (h *Handler) listSecrets(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListSecrets(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 
 	pg, err := validator.ValidatePagination(
@@ -169,7 +169,7 @@ func (h *Handler) listSecrets(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-func (h *Handler) getSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	secretID := chi.URLParam(r, "id")
 
@@ -201,7 +201,7 @@ type updateSecretRequest struct {
 	EncryptedDEK  string `json:"encrypted_dek"`  // base64 (pre-encrypted)
 }
 
-func (h *Handler) updateSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	secretID := chi.URLParam(r, "id")
 
@@ -279,7 +279,7 @@ func (h *Handler) updateSecret(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(secret)
 }
 
-func (h *Handler) deleteSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	secretID := chi.URLParam(r, "id")
 

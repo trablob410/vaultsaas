@@ -169,6 +169,30 @@ func main() {
 			r.Mount("/", authHandler.Routes())
 		})
 
+		// Dual-auth routes: accept either user JWT or agent bearer token
+		// These routes allow both users and AI agents to read/list data
+		r.Group(func(r chi.Router) {
+			r.Use(dualAuthMiddleware(jwtMgr, agentSvc))
+			r.Use(apiLimiter.Middleware())
+			if agentRateLimiter != nil {
+				r.Use(agentRateLimiter.Middleware(60))
+			}
+
+			// GET secrets - readable by both users and agents
+			r.Get("/secrets", vaultHandler.ListSecrets)
+			r.Get("/secrets/{id}", vaultHandler.GetSecret)
+
+			// Create/modify secrets - JWT only (kept in separate group below)
+			// Posted as separate routes with JWT-only auth
+
+			// Access request flow - readable by both
+			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
+			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
+			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
+			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
+		})
+
+		// JWT-only authenticated routes: for write operations and user-specific operations
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware(jwtMgr))
 			r.Use(apiLimiter.Middleware())
@@ -176,10 +200,17 @@ func main() {
 				r.Use(agentRateLimiter.Middleware(60))
 			}
 
-			r.Mount("/secrets", vaultHandler.Routes())
+			// Secret write operations - JWT/users only
+			r.Post("/secrets", vaultHandler.CreateSecret)
+			r.Put("/secrets/{id}", vaultHandler.UpdateSecret)
+			r.Delete("/secrets/{id}", vaultHandler.DeleteSecret)
+
+			// Access request management - JWT/users only
 			r.Get("/access-requests", workflowHandler.ListPending)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)
 			r.Post("/access-requests/{request_id}/reject", workflowHandler.Reject)
+
+			// Audit and user-specific operations
 			r.Mount("/audit", auditHandler.Routes())
 			r.Mount("/consent", consentHandler.Routes())
 			r.Mount("/orgs", orgHandler.Routes())
@@ -190,16 +221,6 @@ func main() {
 			scannerHandler.RegisterRoutes(r)
 			dynHandler.RegisterRoutes(r)
 			usageHandler.RegisterRoutes(r)
-		})
-
-		// Dual-auth routes: accept either user JWT or agent bearer token
-		r.Group(func(r chi.Router) {
-			r.Use(dualAuthMiddleware(jwtMgr, agentSvc))
-			r.Use(apiLimiter.Middleware())
-			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
-			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
-			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
-			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
 		})
 	})
 
