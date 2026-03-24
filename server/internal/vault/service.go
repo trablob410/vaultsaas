@@ -247,3 +247,70 @@ func (s *Service) DeleteSecret(ctx context.Context, userID, secretID string) err
 	}
 	return nil
 }
+
+// ListSecretsForAgent lists secrets accessible to an agent via their projects.
+func (s *Service) ListSecretsForAgent(ctx context.Context, agentID string, page, limit, offset int) (*ListResult, error) {
+	var total int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(DISTINCT s.id) FROM secrets s
+		 WHERE s.project_id IN (SELECT project_id FROM agent_identities WHERE id = $1)
+		 AND s.deleted_at IS NULL`,
+		agentID,
+	).Scan(&total)
+	if err != nil {
+		return nil, fmt.Errorf("counting secrets for agent: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT s.id, s.user_id, s.name, s.description, s.credential_type, s.source, s.version, s.policy, s.created_at, s.updated_at
+		 FROM secrets s
+		 WHERE s.project_id IN (SELECT project_id FROM agent_identities WHERE id = $1)
+		 AND s.deleted_at IS NULL
+		 ORDER BY s.created_at DESC LIMIT $2 OFFSET $3`,
+		agentID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying secrets for agent: %w", err)
+	}
+	defer rows.Close()
+
+	var secrets []Secret
+	for rows.Next() {
+		var sec Secret
+		if err := rows.Scan(&sec.ID, &sec.UserID, &sec.Name, &sec.Description,
+			&sec.CredentialType, &sec.Source, &sec.Version,
+			&sec.Policy, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning secret: %w", err)
+		}
+		secrets = append(secrets, sec)
+	}
+	if secrets == nil {
+		secrets = []Secret{}
+	}
+
+	return &ListResult{Secrets: secrets, Total: total, Page: page, Limit: limit}, nil
+}
+
+// GetSecretForAgent retrieves a secret accessible to an agent via their projects.
+func (s *Service) GetSecretForAgent(ctx context.Context, agentID, secretID string) (*Secret, error) {
+	var secret Secret
+	err := s.pool.QueryRow(ctx,
+		`SELECT s.id, s.user_id, s.name, s.description, s.storage_key, s.encrypted_dek,
+		        s.credential_type, s.source, s.version, s.policy, s.created_at, s.updated_at
+		 FROM secrets s
+		 WHERE s.id = $1
+		 AND s.project_id IN (SELECT project_id FROM agent_identities WHERE id = $2)
+		 AND s.deleted_at IS NULL`,
+		secretID, agentID,
+	).Scan(&secret.ID, &secret.UserID, &secret.Name, &secret.Description,
+		&secret.StorageKey, &secret.EncryptedDEK,
+		&secret.CredentialType, &secret.Source, &secret.Version,
+		&secret.Policy, &secret.CreatedAt, &secret.UpdatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("querying secret for agent: %w", err)
+	}
+	return &secret, nil
+}
