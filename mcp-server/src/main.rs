@@ -10,6 +10,8 @@ mod resources;
 mod scanner;
 mod scanner_tools;
 mod tools;
+mod tools_e2e;
+mod integration;
 
 use clap::Parser;
 use serde_json::{json, Value};

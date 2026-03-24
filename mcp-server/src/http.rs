@@ -10,8 +10,8 @@ use axum::{
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
+use futures_util::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
-use tokio_stream::StreamExt;
 
 use crate::client::ValtClient;
 

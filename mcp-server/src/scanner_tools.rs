@@ -73,15 +73,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_list_tools_returns_eight() {
+    fn test_list_tools_returns_nine() {
         let tool_list = tools::list_tools();
-        assert_eq!(tool_list.len(), 8);
+        assert_eq!(tool_list.len(), 9);
         let names: Vec<&str> = tool_list.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"request_secret_access"));
         assert!(names.contains(&"list_my_secrets"));
         assert!(names.contains(&"authenticate_agent"));
         assert!(names.contains(&"scan_secrets"));
         assert!(names.contains(&"store_secret"));
+        assert!(names.contains(&"request_dynamic_secret"));
     }
 
     #[test]
