@@ -88,6 +88,11 @@ func (s *Service) resolveEffectivePolicy(ctx context.Context, secretID, credenti
 		}
 	}
 
+	// Log when overrides are applied for debugging
+	if runtimePolicy.Source == policy.PolicySourceTemplateOverride {
+		log.Printf("[policy-enforcement-v2] using template+override policy for secret=%s: cooldown=%d (may differ from template default)", secretID, runtimePolicy.Parameters.CoolDownMinutes)
+	}
+
 	return effectivePolicy{
 		policy:          runtimePolicy.Parameters.ToPolicy(policy.DeriveRiskTier(credentialType)),
 		applied:         runtimePolicy.Parameters,
