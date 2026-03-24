@@ -59,6 +59,11 @@ impl ValtClient {
         let status = res.status().as_u16();
         let body: Value = res.json().await?;
         if status >= 400 {
+            if status == 401 {
+                eprintln!(
+                    "[valt-mcp-server] WARN unauthorized API call to {url}. token invalid/expired OR wrong token type for this endpoint"
+                );
+            }
             let msg = body.get("error")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown error")
@@ -78,6 +83,11 @@ impl ValtClient {
         let status = res.status().as_u16();
         let resp: Value = res.json().await.unwrap_or(Value::Null);
         if status >= 400 {
+            if status == 401 {
+                eprintln!(
+                    "[valt-mcp-server] WARN unauthorized API call to {url}. token invalid/expired OR wrong token type for this endpoint"
+                );
+            }
             let msg = resp.get("error")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown error")
