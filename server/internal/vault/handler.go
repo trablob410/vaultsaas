@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/valt-dev/valt/server/internal/agent"
 	"github.com/valt-dev/valt/server/internal/auth"
 	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/pkg/apierror"
@@ -36,11 +37,11 @@ func NewHandler(service *Service, masterKey []byte) *Handler {
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Post("/", h.createSecret)
-	r.Get("/", h.listSecrets)
-	r.Get("/{id}", h.getSecret)
-	r.Put("/{id}", h.updateSecret)
-	r.Delete("/{id}", h.deleteSecret)
+	r.Post("/", h.CreateSecret)
+	r.Get("/", h.ListSecrets)
+	r.Get("/{id}", h.GetSecret)
+	r.Put("/{id}", h.UpdateSecret)
+	r.Delete("/{id}", h.DeleteSecret)
 	return r
 }
 
@@ -49,13 +50,14 @@ type createSecretRequest struct {
 	Description    string `json:"description"`
 	CredentialType string `json:"credential_type"`
 	Source         string `json:"source"`
+	ProjectID      string `json:"project_id"`
 	Value          string `json:"value"`          // plaintext (server encrypts)
 	EncryptedBlob  string `json:"encrypted_blob"` // base64 (pre-encrypted, backward compat)
 	EncryptedDEK   string `json:"encrypted_dek"`  // base64 (pre-encrypted, backward compat)
 	Policy         string `json:"policy"`
 }
 
-func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 
 	var req createSecretRequest
@@ -72,6 +74,13 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 	if req.CredentialType != "" && !validCredentialTypes[req.CredentialType] {
 		apierror.BadRequest(w, "invalid credential_type")
 		return
+	}
+
+	if req.ProjectID != "" {
+		if _, err := validator.ValidateUUID(req.ProjectID); err != nil {
+			apierror.BadRequest(w, "invalid project_id")
+			return
+		}
 	}
 
 	var blob, dek []byte
@@ -123,6 +132,7 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 		CredentialType: req.CredentialType,
 		Source:         req.Source,
+		ProjectID:      req.ProjectID,
 		EncryptedBlob:  blob,
 		EncryptedDEK:   dek,
 		Policy:         req.Policy,
@@ -138,8 +148,14 @@ func (h *Handler) createSecret(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(secret)
 }
 
-func (h *Handler) listSecrets(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListSecrets(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
+	agentID := agent.AgentIDFromContext(r.Context())
+
+	if userID == "" && agentID == "" {
+		apierror.Unauthorized(w, "authentication required")
+		return
+	}
 
 	pg, err := validator.ValidatePagination(
 		r.URL.Query().Get("page"),
@@ -150,7 +166,15 @@ func (h *Handler) listSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.ListSecrets(r.Context(), userID, pg.Page, pg.Limit, pg.Offset)
+	var result *ListResult
+	if agentID != "" {
+		// Agent path: list secrets from agent's accessible projects
+		result, err = h.service.ListSecretsForAgent(r.Context(), agentID, pg.Page, pg.Limit, pg.Offset)
+	} else {
+		// User path: list owned secrets
+		result, err = h.service.ListSecrets(r.Context(), userID, pg.Page, pg.Limit, pg.Offset)
+	}
+
 	if err != nil {
 		log.Printf("Failed to list secrets: %v", err)
 		apierror.InternalError(w, "failed to list secrets")
@@ -161,8 +185,15 @@ func (h *Handler) listSecrets(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-func (h *Handler) getSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
+	agentID := agent.AgentIDFromContext(r.Context())
+
+	if userID == "" && agentID == "" {
+		apierror.Unauthorized(w, "authentication required")
+		return
+	}
+
 	secretID := chi.URLParam(r, "id")
 
 	if _, err := validator.ValidateUUID(secretID); err != nil {
@@ -170,7 +201,17 @@ func (h *Handler) getSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, err := h.service.GetSecret(r.Context(), userID, secretID)
+	var secret *Secret
+	var err error
+
+	if agentID != "" {
+		// Agent path: get secret from accessible projects
+		secret, err = h.service.GetSecretForAgent(r.Context(), agentID, secretID)
+	} else {
+		// User path: get owned secret
+		secret, err = h.service.GetSecret(r.Context(), userID, secretID)
+	}
+
 	if err != nil {
 		log.Printf("Failed to get secret: %v", err)
 		apierror.InternalError(w, "failed to get secret")
@@ -193,7 +234,7 @@ type updateSecretRequest struct {
 	EncryptedDEK  string `json:"encrypted_dek"`  // base64 (pre-encrypted)
 }
 
-func (h *Handler) updateSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	secretID := chi.URLParam(r, "id")
 
@@ -271,7 +312,7 @@ func (h *Handler) updateSecret(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(secret)
 }
 
-func (h *Handler) deleteSecret(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	secretID := chi.URLParam(r, "id")
 

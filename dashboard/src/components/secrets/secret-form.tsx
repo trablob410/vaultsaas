@@ -9,16 +9,18 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 
 interface Props {
   open: boolean
   secret?: Secret | null
+  projectId?: string | null
   onClose: () => void
   onSuccess: () => void
+  onCreated?: (secretId: string) => void
 }
 
-export default function SecretForm({ open, secret, onClose, onSuccess }: Props) {
+export default function SecretForm({ open, secret, projectId, onClose, onSuccess, onCreated }: Props) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [credentialType, setCredentialType] = useState('')
@@ -40,17 +42,44 @@ export default function SecretForm({ open, secret, onClose, onSuccess }: Props) 
     setError('')
   }, [secret, open])
 
+  const isDirty = secret 
+    ? (name !== secret.name || description !== (secret.description ?? '') || credentialType !== secret.credential_type || source !== (secret.source ?? ''))
+    : (name !== '' || description !== '' || credentialType !== '' || source !== '' || value !== '')
+
+  const handleClose = () => {
+    if (isDirty) {
+      if (window.confirm('You have unsaved changes. Are you sure you want to close?')) {
+        onClose()
+      }
+    } else {
+      onClose()
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!credentialType) {
+      setError('Type is required')
+      return
+    }
     setLoading(true)
     setError('')
     try {
       if (secret) {
         await api.secrets.update(secret.id, { name, description, credential_type: credentialType, source })
+        onSuccess()
       } else {
-        await api.secrets.create({ name, description, credential_type: credentialType, source, value })
+        const created = await api.secrets.create({
+          name,
+          description,
+          credential_type: credentialType,
+          source,
+          value,
+          project_id: projectId ?? undefined,
+        })
+        onCreated?.(created.id)
+        onSuccess()
       }
-      onSuccess()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -59,22 +88,21 @@ export default function SecretForm({ open, secret, onClose, onSuccess }: Props) 
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+      <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{secret ? 'Edit Secret' : 'New Secret'}</DialogTitle>
+          <DialogTitle>{secret ? 'Edit Secret' : 'Create Secret'}</DialogTitle>
+          <DialogDescription>
+            {secret ? 'Modify the details of your secret.' : 'Add a new secret to your vault.'}
+          </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+        <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="name">Name *</Label>
+            <Label htmlFor="name">Name <span className="text-destructive">*</span></Label>
             <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="desc">Description</Label>
-            <Input id="desc" value={description} onChange={(e) => setDescription(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Type</Label>
+            <Label>Type <span className="text-destructive">*</span></Label>
             <Select value={credentialType} onValueChange={setCredentialType}>
               <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
               <SelectContent>
@@ -84,20 +112,28 @@ export default function SecretForm({ open, secret, onClose, onSuccess }: Props) 
               </SelectContent>
             </Select>
           </div>
+          
+          {!secret && (
+            <div className="space-y-1.5">
+              <Label htmlFor="value">Value <span className="text-destructive">*</span></Label>
+              <Textarea id="value" value={value} onChange={(e) => setValue(e.target.value)} required rows={3} />
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="desc">Description</Label>
+            <Input id="desc" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          
           <div className="space-y-1.5">
             <Label htmlFor="source">Source</Label>
             <Input id="source" value={source} onChange={(e) => setSource(e.target.value)} />
           </div>
-          {!secret && (
-            <div className="space-y-1.5">
-              <Label htmlFor="value">Value *</Label>
-              <Textarea id="value" value={value} onChange={(e) => setValue(e.target.value)} required rows={3} />
-            </div>
-          )}
+
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={loading}>{loading ? 'Saving…' : 'Save'}</Button>
+          <DialogFooter className="pt-2">
+            <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
+            <Button type="submit" disabled={loading}>{secret ? 'Save changes' : 'Create secret'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

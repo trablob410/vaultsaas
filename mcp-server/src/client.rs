@@ -59,8 +59,23 @@ impl ValtClient {
         let status = res.status().as_u16();
         let body: Value = res.json().await?;
         if status >= 400 {
+            if status == 401 {
+                eprintln!(
+                    "[valt-mcp-server] WARN unauthorized API call to {url}. token invalid/expired OR wrong token type for this endpoint"
+                );
+            }
+            // Extract error message from API response
+            // Format: {"error": {"code": "...", "message": "..."}}
             let msg = body.get("error")
-                .and_then(|v| v.as_str())
+                .and_then(|err| {
+                    // Try to get message from error object
+                    err.get("message")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            // Fallback: try error as string directly
+                            err.as_str()
+                        })
+                })
                 .unwrap_or("unknown error")
                 .to_string();
             return Err(ValtError::Api { status, message: msg });
@@ -78,8 +93,23 @@ impl ValtClient {
         let status = res.status().as_u16();
         let resp: Value = res.json().await.unwrap_or(Value::Null);
         if status >= 400 {
+            if status == 401 {
+                eprintln!(
+                    "[valt-mcp-server] WARN unauthorized API call to {url}. token invalid/expired OR wrong token type for this endpoint"
+                );
+            }
+            // Extract error message from API response
+            // Format: {"error": {"code": "...", "message": "..."}}
             let msg = resp.get("error")
-                .and_then(|v| v.as_str())
+                .and_then(|err| {
+                    // Try to get message from error object
+                    err.get("message")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            // Fallback: try error as string directly
+                            err.as_str()
+                        })
+                })
                 .unwrap_or("unknown error")
                 .to_string();
             return Err(ValtError::Api { status, message: msg });

@@ -62,6 +62,9 @@ type Config struct {
 	// Telegram (optional — empty disables Telegram notifications)
 	TelegramBotToken    string `envconfig:"TELEGRAM_BOT_TOKEN" default:""`
 	TelegramBotUsername string `envconfig:"TELEGRAM_BOT_USERNAME" default:"valtbot"`
+
+	// Policy enforcement rollout
+	PolicyEnforcementV2Enabled bool `envconfig:"POLICY_ENFORCEMENT_V2_ENABLED" default:"true"`
 }
 
 // MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.

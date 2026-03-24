@@ -23,6 +23,16 @@ func NewHandler(service *Service) *Handler {
 // /workspaces/{workspace_id}/projects. Project-direct routes use {project_id}.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
+	h.registerRoutes(r)
+	return r
+}
+
+// RegisterRoutes registers project routes onto an existing router group.
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	h.registerRoutes(r)
+}
+
+func (h *Handler) registerRoutes(r chi.Router) {
 	// workspace-scoped
 	r.Post("/workspaces/{workspace_id}/projects", h.createProject)
 	r.Get("/workspaces/{workspace_id}/projects", h.listProjects)
@@ -30,7 +40,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/projects/{project_id}", h.getProject)
 	r.Post("/projects/{project_id}/members", h.addMember)
 	r.Get("/projects/{project_id}/members", h.listMembers)
-	return r
 }
 
 type createProjectRequest struct {

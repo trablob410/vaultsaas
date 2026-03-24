@@ -2,7 +2,9 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,22 +44,106 @@ type CreateRequestInput struct {
 
 // Service handles the approval workflow.
 type Service struct {
-	pool     *pgxpool.Pool
-	resolver *policy.Resolver
+	pool            *pgxpool.Pool
+	resolver        *policy.Resolver
+	policyRepo      *policy.Repository
+	policyV2Enabled bool
 }
 
 // NewService creates a workflow Service.
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, resolver: policy.NewResolver(pool)}
+func NewService(pool *pgxpool.Pool, policyV2Enabled bool) *Service {
+	return &Service{
+		pool:            pool,
+		resolver:        policy.NewResolver(pool),
+		policyRepo:      policy.NewRepository(pool),
+		policyV2Enabled: policyV2Enabled,
+	}
+}
+
+type effectivePolicy struct {
+	policy          policy.Policy
+	applied         policy.PolicyParameters
+	templateID      *string
+	templateVersion *int
+	warnings        []string
+	source          string
+}
+
+func (s *Service) resolveEffectivePolicy(ctx context.Context, secretID, credentialType string) effectivePolicy {
+	defaults := policy.DefaultParametersForCredentialType(credentialType)
+	if !s.policyV2Enabled {
+		return effectivePolicy{
+			policy:  defaults.ToPolicy(policy.DeriveRiskTier(credentialType)),
+			applied: defaults,
+			source:  policy.PolicySourceDefault,
+		}
+	}
+
+	runtimePolicy, err := s.policyRepo.ResolveRuntimePolicyBySecretID(ctx, secretID)
+	if err != nil {
+		policy.ObserveResolution(policy.PolicySourceDefault, "runtime_fallback_default", nil)
+		log.Printf("[policy-enforcement-v2] runtime policy resolution failed for secret=%s, fallback=default, err=%v", secretID, err)
+		return effectivePolicy{
+			policy:  defaults.ToPolicy(policy.DeriveRiskTier(credentialType)),
+			applied: defaults,
+			source:  policy.PolicySourceDefault,
+		}
+	}
+
+	// Log when overrides are applied for debugging
+	if runtimePolicy.Source == policy.PolicySourceTemplateOverride {
+		log.Printf("[policy-enforcement-v2] using template+override policy for secret=%s: cooldown=%d (may differ from template default)", secretID, runtimePolicy.Parameters.CoolDownMinutes)
+	}
+
+	return effectivePolicy{
+		policy:          runtimePolicy.Parameters.ToPolicy(policy.DeriveRiskTier(credentialType)),
+		applied:         runtimePolicy.Parameters,
+		templateID:      runtimePolicy.TemplateID,
+		templateVersion: runtimePolicy.TemplateVersion,
+		warnings:        runtimePolicy.Warnings,
+		source:          runtimePolicy.Source,
+	}
+}
+
+// EffectivePolicyForSecret returns the effective policy for a secret.
+func (s *Service) EffectivePolicyForSecret(ctx context.Context, secretID, credentialType string) policy.Policy {
+	return s.resolveEffectivePolicy(ctx, secretID, credentialType).policy
+}
+
+// EffectivePolicyForRequest returns the effective policy from the request's snapshot.
+func (s *Service) EffectivePolicyForRequest(ctx context.Context, requestID, credentialType string) policy.Policy {
+	defaults := policy.DefaultParametersForCredentialType(credentialType)
+	fallback := defaults.ToPolicy(policy.DeriveRiskTier(credentialType))
+
+	var appliedRaw []byte
+	if err := s.pool.QueryRow(ctx, `SELECT applied_policy FROM access_requests WHERE id = $1`, requestID).Scan(&appliedRaw); err != nil {
+		policy.ObserveResolution(policy.PolicySourceDefault, "request_snapshot_fallback_default", nil)
+		log.Printf("[policy-enforcement-v2] request snapshot load failed request=%s fallback=default err=%v", requestID, err)
+		return fallback
+	}
+
+	var input map[string]any
+	if err := json.Unmarshal(appliedRaw, &input); err != nil {
+		policy.ObserveResolution(policy.PolicySourceDefault, "request_snapshot_decode_failed", nil)
+		log.Printf("[policy-enforcement-v2] request snapshot decode failed request=%s fallback=default err=%v", requestID, err)
+		return fallback
+	}
+	params, err := policy.ValidateParameters(input)
+	if err != nil {
+		policy.ObserveResolution(policy.PolicySourceDefault, "request_snapshot_invalid", nil)
+		log.Printf("[policy-enforcement-v2] request snapshot invalid request=%s fallback=default err=%v", requestID, err)
+		return fallback
+	}
+	return params.ToPolicy(policy.DeriveRiskTier(credentialType))
 }
 
 // CreateRequest creates a new access request, enforcing policy.
 func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (*AccessRequest, error) {
-	p, customApprovers, err := s.resolver.Resolve(ctx, input.SecretID, input.CredentialType)
-	if err != nil {
-		// Fall back to tier defaults on resolver error (e.g. secret not found yet)
-		p = policy.ForCredentialType(input.CredentialType)
-	}
+	effective := s.resolveEffectivePolicy(ctx, input.SecretID, input.CredentialType)
+	p := effective.policy
+
+	// Also resolve custom approvers from the legacy resolver
+	_, customApprovers, _ := s.resolver.Resolve(ctx, input.SecretID, input.CredentialType)
 
 	// Enforce reason requirements
 	if p.RequireReason && len(input.Reason) < p.MinReasonLength {
@@ -137,13 +223,29 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 	if input.RequesterUserID != "" {
 		requesterUserID = &input.RequesterUserID
 	}
+	appliedRaw, marshalErr := json.Marshal(effective.applied)
+	if marshalErr != nil {
+		return nil, fmt.Errorf("marshal applied policy snapshot: %w", marshalErr)
+	}
+	warnings := effective.warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	warningsRaw, marshalErr := json.Marshal(warnings)
+	if marshalErr != nil {
+		return nil, fmt.Errorf("marshal applied policy warnings: %w", marshalErr)
+	}
 
 	insertErr := s.pool.QueryRow(ctx,
-		`INSERT INTO access_requests (secret_id, requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
+		`INSERT INTO access_requests (
+			secret_id, requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes,
+			applied_policy, applied_template_id, applied_template_version, applied_policy_source, applied_policy_warnings
+		)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb)
+		 RETURNING id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		input.SecretID, requesterUserID, input.RequesterType, aiAgentID,
 		initialStatus, input.Reason, dur,
+		appliedRaw, effective.templateID, effective.templateVersion, effective.source, warningsRaw,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
 		&req.AIAgentID, &req.Status, &req.Reason, &req.RequestedDurationMinutes,
 		&req.DecidedBy, &req.DecidedAt, &req.ExpiresAt, &req.CreatedAt)
@@ -185,7 +287,7 @@ func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, l
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT ar.id, ar.secret_id, COALESCE(s.name, '') AS secret_name,
-		        COALESCE(ar.requester_user_id, '') AS requester_user_id, ar.requester_type, ar.ai_agent_id,
+		        COALESCE(ar.requester_user_id::text, '') AS requester_user_id, ar.requester_type, ar.ai_agent_id,
 		        ar.status, ar.reason, ar.requested_duration_minutes, ar.decided_by, ar.decided_at, ar.expires_at, ar.created_at
 		 FROM access_requests ar
 		 JOIN secrets s ON s.id = ar.secret_id AND s.user_id = $1 AND s.deleted_at IS NULL
@@ -223,7 +325,7 @@ func (s *Service) Approve(ctx context.Context, requestID, approverUserID string)
 		 SET status = 'approved', decided_by = $1, decided_at = NOW(),
 		     expires_at = NOW() + (requested_duration_minutes || ' minutes')::INTERVAL
 		 WHERE id = $2 AND status = 'pending'
-		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
+		 RETURNING id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		           requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		approverUserID, requestID,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
@@ -245,7 +347,7 @@ func (s *Service) Reject(ctx context.Context, requestID, approverUserID, rejecti
 		`UPDATE access_requests
 		 SET status = 'rejected', decided_by = $1, decided_at = NOW(), rejection_reason = $3
 		 WHERE id = $2 AND status = 'pending'
-		 RETURNING id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
+		 RETURNING id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		           rejection_reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at`,
 		approverUserID, requestID, rejectionReason,
 	).Scan(&req.ID, &req.SecretID, &req.RequesterUserID, &req.RequesterType,
@@ -276,7 +378,7 @@ func (s *Service) IsAssignedApprover(ctx context.Context, requestID, userID stri
 func (s *Service) GetRequestByID(ctx context.Context, requestID string) (*AccessRequest, error) {
 	var req AccessRequest
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, secret_id, COALESCE(requester_user_id, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
+		`SELECT id, secret_id, COALESCE(requester_user_id::text, '') AS requester_user_id, requester_type, ai_agent_id, status, reason,
 		        rejection_reason, requested_duration_minutes, decided_by, decided_at, expires_at, created_at
 		 FROM access_requests WHERE id = $1`,
 		requestID,

@@ -27,6 +27,7 @@ import (
 	"github.com/valt-dev/valt/server/internal/notify"
 	"github.com/valt-dev/valt/server/internal/rbac"
 	"github.com/valt-dev/valt/server/internal/org"
+	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/internal/project"
 	"github.com/valt-dev/valt/server/internal/ratelimit"
 	"github.com/valt-dev/valt/server/internal/scanner"
@@ -102,7 +103,7 @@ func main() {
 	vaultService := vault.NewService(pool, storage)
 	vaultHandler := vault.NewHandler(vaultService, masterKey)
 
-	workflowSvc := workflow.NewService(pool)
+	workflowSvc := workflow.NewService(pool, cfg.PolicyEnforcementV2Enabled)
 	credMgr := workflow.NewCredentialManager(pool)
 	workflowHandler := workflow.NewHandler(workflowSvc, credMgr, vaultService, auditLogger, notifySvc, tokenStore, masterKey, pool)
 	slackWebhookHandler := notify.NewSlackWebhookHandler(cfg.SlackSigningSecret, workflowHandler, slackAdapter)
@@ -121,6 +122,8 @@ func main() {
 	projectHandler := project.NewHandler(projectSvc)
 	agentSvc := agent.NewService(pool)
 	agentHandler := agent.NewHandler(agentSvc)
+	policySvc := policy.NewService(pool)
+	policyHandler := policy.NewHandler(policySvc)
 	scannerSvc := scanner.NewService(pool)
 	scannerHandler := scanner.NewHandler(scannerSvc, pool)
 	dynSvc := dynsecret.NewService(pool, masterKey)
@@ -183,6 +186,28 @@ func main() {
 		// Public: Telegram Update callbacks (no auth — Telegram pushes to this endpoint)
 		r.Post("/webhooks/telegram", telegramWebhookHandler.Handle)
 
+		// Dual-auth routes: accept either user JWT or agent bearer token
+		// These routes allow both users and AI agents to read/list data
+		r.Group(func(r chi.Router) {
+			r.Use(dualAuthMiddleware(jwtMgr, agentSvc))
+			r.Use(apiLimiter.Middleware())
+			if agentRateLimiter != nil {
+				r.Use(agentRateLimiter.Middleware(60))
+			}
+
+			// GET secrets - readable by both users and agents
+			r.Get("/secrets", vaultHandler.ListSecrets)
+			r.Get("/secrets/{id}", vaultHandler.GetSecret)
+
+			// Access request flow - readable by both
+			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
+			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
+			r.Get("/credentials/active", workflowHandler.GetActiveCredentials)
+			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
+			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
+		})
+
+		// JWT-only authenticated routes: for write operations and user-specific operations
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware(jwtMgr))
 			r.Use(apiLimiter.Middleware())
@@ -203,36 +228,36 @@ func main() {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{"url": url})
 			})
-			r.Mount("/secrets", vaultHandler.Routes())
+
+			// Secret write operations - JWT/users only
+			r.Post("/secrets", vaultHandler.CreateSecret)
+			r.Put("/secrets/{id}", vaultHandler.UpdateSecret)
+			r.Delete("/secrets/{id}", vaultHandler.DeleteSecret)
+
+			// Secret policy endpoints
 			r.Get("/secrets/{id}/policy", vaultHandler.GetSecretPolicy)
 			r.Put("/secrets/{id}/policy", vaultHandler.PutSecretPolicy)
 			r.With(rbac.Middleware(pool, "project_id", rbac.ResourceProject, rbac.ActionAdmin)).
 				Get("/projects/{project_id}/policy", projectHandler.GetProjectPolicy)
 			r.With(rbac.Middleware(pool, "project_id", rbac.ResourceProject, rbac.ActionAdmin)).
 				Put("/projects/{project_id}/policy", projectHandler.PutProjectPolicy)
+
+			// Access request management - JWT/users only
 			r.Get("/access-requests", workflowHandler.ListPending)
 			r.Post("/access-requests/{request_id}/approve", workflowHandler.Approve)
 			r.Post("/access-requests/{request_id}/reject", workflowHandler.Reject)
+
+			// Audit and user-specific operations
 			r.Mount("/audit", auditHandler.Routes())
 			r.Mount("/consent", consentHandler.Routes())
 			r.Mount("/orgs", orgHandler.Routes())
 			r.Mount("/orgs/{org_id}/workspaces", workspaceHandler.Routes())
-			r.Mount("/", projectHandler.Routes())
-			r.Mount("/", agentHandler.Routes())
-			r.Mount("/", scannerHandler.Routes())
-			r.Mount("/", dynHandler.Routes())
-			r.Mount("/", usageHandler.Routes())
-		})
-
-		// Dual-auth routes: accept either user JWT or agent bearer token
-		r.Group(func(r chi.Router) {
-			r.Use(dualAuthMiddleware(jwtMgr, agentSvc))
-			r.Use(apiLimiter.Middleware())
-			r.Post("/secrets/{secret_id}/access-requests", workflowHandler.CreateRequest)
-			r.Get("/access-requests/{request_id}", workflowHandler.GetRequest)
-			r.Get("/credentials/active", workflowHandler.GetActiveCredentials)
-			r.Get("/credentials/{request_id}", workflowHandler.GetCredential)
-			r.Post("/credentials/{request_id}/revoke", workflowHandler.RevokeCredential)
+			projectHandler.RegisterRoutes(r)
+			agentHandler.RegisterRoutes(r)
+			policyHandler.RegisterRoutes(r)
+			scannerHandler.RegisterRoutes(r)
+			dynHandler.RegisterRoutes(r)
+			usageHandler.RegisterRoutes(r)
 		})
 	})
 

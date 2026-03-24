@@ -29,6 +29,16 @@ func NewHandler(service *Service, db *pgxpool.Pool) *Handler {
 // Routes returns a chi.Router with all dynamic secret routes.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
+	h.registerRoutes(r)
+	return r
+}
+
+// RegisterRoutes registers dynsecret routes onto an existing router group.
+func (h *Handler) RegisterRoutes(r chi.Router) {
+	h.registerRoutes(r)
+}
+
+func (h *Handler) registerRoutes(r chi.Router) {
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceDynSecret, rbac.ActionWrite)).
 		Post("/projects/{project_id}/providers", h.createProvider)
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceDynSecret, rbac.ActionRead)).
@@ -36,7 +46,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/providers/{provider_id}/leases", h.createLease)
 	r.Get("/providers/{provider_id}/leases", h.listLeases)
 	r.Delete("/leases/{lease_id}", h.revokeLease)
-	return r
 }
 
 type createProviderRequest struct {
