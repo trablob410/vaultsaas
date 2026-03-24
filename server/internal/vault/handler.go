@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/valt-dev/valt/server/internal/agent"
 	"github.com/valt-dev/valt/server/internal/auth"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 	"github.com/valt-dev/valt/server/pkg/crypto"
@@ -148,6 +149,12 @@ func (h *Handler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListSecrets(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
+	agentID := agent.AgentIDFromContext(r.Context())
+
+	if userID == "" && agentID == "" {
+		apierror.Unauthorized(w, "authentication required")
+		return
+	}
 
 	pg, err := validator.ValidatePagination(
 		r.URL.Query().Get("page"),
@@ -158,7 +165,15 @@ func (h *Handler) ListSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.ListSecrets(r.Context(), userID, pg.Page, pg.Limit, pg.Offset)
+	var result *ListResult
+	if agentID != "" {
+		// Agent path: list secrets from agent's accessible projects
+		result, err = h.service.ListSecretsForAgent(r.Context(), agentID, pg.Page, pg.Limit, pg.Offset)
+	} else {
+		// User path: list owned secrets
+		result, err = h.service.ListSecrets(r.Context(), userID, pg.Page, pg.Limit, pg.Offset)
+	}
+
 	if err != nil {
 		log.Printf("Failed to list secrets: %v", err)
 		apierror.InternalError(w, "failed to list secrets")
@@ -171,6 +186,13 @@ func (h *Handler) ListSecrets(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetSecret(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
+	agentID := agent.AgentIDFromContext(r.Context())
+
+	if userID == "" && agentID == "" {
+		apierror.Unauthorized(w, "authentication required")
+		return
+	}
+
 	secretID := chi.URLParam(r, "id")
 
 	if _, err := validator.ValidateUUID(secretID); err != nil {
@@ -178,7 +200,17 @@ func (h *Handler) GetSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, err := h.service.GetSecret(r.Context(), userID, secretID)
+	var secret *Secret
+	var err error
+
+	if agentID != "" {
+		// Agent path: get secret from accessible projects
+		secret, err = h.service.GetSecretForAgent(r.Context(), agentID, secretID)
+	} else {
+		// User path: get owned secret
+		secret, err = h.service.GetSecret(r.Context(), userID, secretID)
+	}
+
 	if err != nil {
 		log.Printf("Failed to get secret: %v", err)
 		apierror.InternalError(w, "failed to get secret")
