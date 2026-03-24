@@ -108,8 +108,10 @@ export const api = {
       apiFetch<ProjectMembership>(`/projects/${projectId}/members`, { method: 'POST', body: JSON.stringify(body) }),
   },
   agents: {
-    list: (projectId: string) =>
-      apiFetch<{ agents: AgentIdentity[] }>(`/projects/${projectId}/agents`),
+    list: async (projectId: string) => {
+      const data = await apiFetch<{ agents: AgentIdentity[] } | AgentIdentity[]>(`/projects/${projectId}/agents`)
+      return Array.isArray(data) ? { agents: data } : { agents: data.agents ?? [] }
+    },
     create: (projectId: string, body: {
       name: string
       description?: string
@@ -129,8 +131,10 @@ export const api = {
       }),
     revokeToken: (agentId: string, tokenId: string) =>
       apiFetch<void>(`/agents/${agentId}/tokens/${tokenId}`, { method: 'DELETE' }),
-    listTokens: (agentId: string) =>
-      apiFetch<{ tokens: AgentToken[] }>(`/agents/${agentId}/tokens`),
+    listTokens: async (agentId: string) => {
+      const data = await apiFetch<{ tokens: AgentToken[] } | AgentToken[]>(`/agents/${agentId}/tokens`)
+      return Array.isArray(data) ? { tokens: data } : { tokens: data.tokens ?? [] }
+    },
   },
   providers: {
     list: (projectId: string) =>

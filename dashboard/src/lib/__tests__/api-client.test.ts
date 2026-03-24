@@ -222,5 +222,41 @@ describe('api client', () => {
       expect(result.projects).toHaveLength(1)
       expect(result.projects[0].id).toBe('p1')
     })
+
+    it('normalizes array response for agents.list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ id: 'a1', name: 'agent-1' }],
+      })
+
+      const result = await api.agents.list('p1')
+      expect(result.agents).toHaveLength(1)
+      expect(result.agents[0].id).toBe('a1')
+    })
+
+    it('normalizes object response for agents.list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ agents: [{ id: 'a2', name: 'agent-2' }] }),
+      })
+
+      const result = await api.agents.list('p1')
+      expect(result.agents).toHaveLength(1)
+      expect(result.agents[0].id).toBe('a2')
+    })
+
+    it('normalizes array response for agents.listTokens', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ id: 't1', agent_id: 'a1' }],
+      })
+
+      const result = await api.agents.listTokens('a1')
+      expect(result.tokens).toHaveLength(1)
+      expect(result.tokens[0].id).toBe('t1')
+    })
   })
 })
