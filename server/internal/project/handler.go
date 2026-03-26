@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/valt-dev/valt/server/internal/auth"
 	"github.com/valt-dev/valt/server/internal/policy"
 	"github.com/valt-dev/valt/server/pkg/apierror"
 )
@@ -69,6 +70,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to create project: %v", err)
 		apierror.InternalError(w, "failed to create project")
 		return
+	}
+
+	// Auto-add creator as project owner
+	userID := auth.UserIDFromContext(r.Context())
+	if userID != "" {
+		if _, err := h.service.AddMember(r.Context(), p.ID, userID, "owner"); err != nil {
+			log.Printf("Failed to add creator as project owner: %v", err)
+			// Project was created but ownership failed — not fatal, log and continue
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

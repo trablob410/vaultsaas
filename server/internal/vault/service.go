@@ -62,6 +62,16 @@ func NewService(pool *pgxpool.Pool, storage Storage) *Service {
 	return &Service{pool: pool, storage: storage}
 }
 
+// IsProjectMember checks if a user belongs to the given project.
+func (s *Service) IsProjectMember(ctx context.Context, projectID, userID string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM project_memberships WHERE project_id = $1 AND user_id = $2)`,
+		projectID, userID,
+	).Scan(&exists)
+	return exists, err
+}
+
 func (s *Service) CreateSecret(ctx context.Context, userID string, input CreateSecretInput) (*Secret, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

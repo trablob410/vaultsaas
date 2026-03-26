@@ -81,6 +81,17 @@ func (h *Handler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 			apierror.BadRequest(w, "invalid project_id")
 			return
 		}
+		// Verify caller is a member of the target project
+		isMember, err := h.service.IsProjectMember(r.Context(), req.ProjectID, userID)
+		if err != nil {
+			log.Printf("Failed to check project membership: %v", err)
+			apierror.InternalError(w, "failed to verify project membership")
+			return
+		}
+		if !isMember {
+			apierror.Forbidden(w, "not a member of this project")
+			return
+		}
 	}
 
 	var blob, dek []byte

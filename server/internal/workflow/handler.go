@@ -645,7 +645,7 @@ func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify caller owns this access request before revoking.
+	// Verify caller owns this access request or is the secret owner before revoking.
 	req, err := h.service.GetRequestByID(r.Context(), requestID)
 	if err != nil {
 		log.Printf("Failed to get request for revoke: %v", err)
@@ -661,8 +661,13 @@ func (h *Handler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
 	callerIsRequester := (userID != "" && req.RequesterUserID == userID) ||
 		(agentID != "" && req.AIAgentID != nil && *req.AIAgentID == agentID)
 	if !callerIsRequester {
-		apierror.Forbidden(w, "not your request")
-		return
+		// Also allow the secret owner to revoke
+		secret, _ := h.vaultSvc.GetSecretByID(r.Context(), req.SecretID)
+		isOwner := secret != nil && userID != "" && secret.UserID == userID
+		if !isOwner {
+			apierror.Forbidden(w, "not your request")
+			return
+		}
 	}
 
 	if err := h.credMgr.RevokeCredential(r.Context(), requestID); err != nil {
