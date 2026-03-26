@@ -50,6 +50,7 @@ func (h *SlackWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		Actions []struct {
 			ActionID string `json:"action_id"`
 		} `json:"actions"`
+		User    struct{ ID string `json:"id"` } `json:"user"`
 		Channel struct{ ID string `json:"id"` } `json:"channel"`
 		Message struct{ Ts string `json:"ts"` } `json:"message"`
 	}
@@ -69,12 +70,15 @@ func (h *SlackWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	action, requestID := parts[0], parts[1]
 
+	// Include Slack user ID in actor for audit trail
+	actor := "slack:" + payload.User.ID
+
 	var actionErr error
 	switch action {
 	case "approve":
-		actionErr = h.approver.ApproveBySystem(r.Context(), requestID, "slack-action")
+		actionErr = h.approver.ApproveBySystem(r.Context(), requestID, actor)
 	case "reject":
-		actionErr = h.approver.RejectBySystem(r.Context(), requestID, "slack-action", "Rejected via Slack")
+		actionErr = h.approver.RejectBySystem(r.Context(), requestID, actor, "Rejected via Slack")
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)
 		return

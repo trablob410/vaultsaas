@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/smtp"
 	"strconv"
+	"strings"
 )
 
 // EmailSender sends email via SMTP.
@@ -45,9 +46,21 @@ This link expires in 72 hours and can only be used once.
 `, secretName, requester, reason, approveURL, rejectURL)
 }
 
+// sanitizeHeader strips CRLF sequences from email header values to prevent header injection.
+func sanitizeHeader(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
+}
+
 // Send sends a plaintext email.
 func (e *EmailSender) Send(_ context.Context, to, subject, body string) error {
 	addr := net.JoinHostPort(e.host, strconv.Itoa(e.port))
+
+	// Sanitize header values to prevent CRLF injection (BCC exfiltration, header spoofing)
+	to = sanitizeHeader(to)
+	subject = sanitizeHeader(subject)
 
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
 		e.from, to, subject, body)
