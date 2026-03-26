@@ -39,6 +39,7 @@ type Handler struct {
 	cliSessionHandler *CLISessionHandler
 	totpHandler       *TOTPHandler
 	emailSender       EmailSender
+	loginLockout      *LoginLockout
 }
 
 // NewHandler constructs a Handler with required dependencies.
@@ -58,6 +59,7 @@ func NewHandler(pool *pgxpool.Pool, jwtMgr *JWTManager, cfg *config.Config) *Han
 		dashboardURL:      cfg.DashboardURL,
 		cliSessionHandler: cliHandler,
 		totpHandler:       nil, // set via SetTOTPHandler after masterKey is available
+		loginLockout:      NewLoginLockout(),
 	}
 }
 
@@ -184,6 +186,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check login lockout before doing any DB work
+	if h.loginLockout.IsLocked(req.Email) {
+		apierror.TooManyRequests(w, "account temporarily locked due to too many failed attempts, try again in 15 minutes")
+		return
+	}
+
 	var userID, passwordHash, status string
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT id, password_hash, status FROM users WHERE email = $1`,
@@ -191,6 +199,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	).Scan(&userID, &passwordHash, &status)
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			h.loginLockout.RecordFailure(req.Email)
 			apierror.Unauthorized(w, "invalid email or password")
 			return
 		}
@@ -206,9 +215,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 
 	match, err := VerifyPassword(req.Password, passwordHash)
 	if err != nil || !match {
+		h.loginLockout.RecordFailure(req.Email)
 		apierror.Unauthorized(w, "invalid email or password")
 		return
 	}
+
+	// Successful login — clear any failed attempts
+	h.loginLockout.ClearFailures(req.Email)
 
 	// Check if TOTP 2FA is enabled
 	var totpEnabled bool
