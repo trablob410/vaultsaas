@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown, ScanLine, Database, Zap, Bell, ShieldCheck, Layers, FolderOpen } from 'lucide-react'
+import { KeyRound, ClipboardCheck, ScrollText, Settings, LogOut, Shield, Bot, Building2, ChevronDown, ScanLine, Database, Zap, Bell, ShieldCheck, Layers, FolderOpen, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -119,6 +119,18 @@ export default function Sidebar() {
         >
           <Zap className="w-4 h-4 shrink-0" />
           Upgrade
+        </Link>
+        <Link
+          href="/admin"
+          className={cn(
+            'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+            pathname.startsWith('/admin')
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+          )}
+        >
+          <ShieldAlert className="w-4 h-4 shrink-0" />
+          Admin
         </Link>
         <button
           onClick={handleLogout}

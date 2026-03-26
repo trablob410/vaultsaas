@@ -38,6 +38,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/", h.createOrg)
 	r.Get("/", h.listOrgs)
 	r.Get("/{org_id}", h.getOrg)
+	r.Put("/{org_id}", h.updateOrg)
 	r.Post("/{org_id}/members", h.addMember)
 	r.Get("/{org_id}/members", h.listMembers)
 	r.Post("/{org_id}/invitations", h.createInvitation)
@@ -115,6 +116,35 @@ func (h *Handler) getOrg(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(o) //nolint:errcheck
+}
+
+type updateOrgRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) updateOrg(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "org_id")
+
+	var req updateOrgRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apierror.BadRequest(w, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		apierror.BadRequest(w, "name is required")
+		return
+	}
+
+	err := h.service.UpdateName(r.Context(), orgID, req.Name)
+	if err != nil {
+		log.Printf("Failed to update org: %v", err)
+		apierror.InternalError(w, "failed to update org")
+		return
+	}
+
+	o, _ := h.service.Get(r.Context(), orgID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(o)
 }
 
 type addMemberRequest struct {

@@ -84,6 +84,12 @@ func (s *Service) Get(ctx context.Context, id string) (*Org, error) {
 	return &o, nil
 }
 
+// UpdateName updates an org's display name.
+func (s *Service) UpdateName(ctx context.Context, orgID, name string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE organizations SET name = $1, updated_at = NOW() WHERE id = $2`, name, orgID)
+	return err
+}
+
 // ListByUser returns all orgs the user is a member of.
 func (s *Service) ListByUser(ctx context.Context, userID string) ([]Org, error) {
 	rows, err := s.pool.Query(ctx,
