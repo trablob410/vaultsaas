@@ -1,13 +1,17 @@
 package auth
 
 import (
+	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -21,13 +25,20 @@ import (
 	"github.com/valt-dev/valt/server/pkg/validator"
 )
 
+// EmailSender is the interface for sending transactional emails.
+type EmailSender interface {
+	Send(ctx context.Context, to, subject, body string) error
+}
+
 // Handler holds the DB pool and JWT manager for auth endpoints.
 type Handler struct {
-	pool               *pgxpool.Pool
-	jwtMgr             *JWTManager
-	oauthConfig        *oauth2.Config
-	dashboardURL       string
-	cliSessionHandler  *CLISessionHandler
+	pool              *pgxpool.Pool
+	jwtMgr            *JWTManager
+	oauthConfig       *oauth2.Config
+	dashboardURL      string
+	cliSessionHandler *CLISessionHandler
+	totpHandler       *TOTPHandler
+	emailSender       EmailSender
 }
 
 // NewHandler constructs a Handler with required dependencies.
@@ -46,7 +57,18 @@ func NewHandler(pool *pgxpool.Pool, jwtMgr *JWTManager, cfg *config.Config) *Han
 		oauthConfig:       oauthCfg,
 		dashboardURL:      cfg.DashboardURL,
 		cliSessionHandler: cliHandler,
+		totpHandler:       nil, // set via SetTOTPHandler after masterKey is available
 	}
+}
+
+// SetTOTPHandler sets the TOTP handler (called after masterKey is available).
+func (h *Handler) SetTOTPHandler(th *TOTPHandler) {
+	h.totpHandler = th
+}
+
+// SetEmailSender sets the email sender for transactional emails.
+func (h *Handler) SetEmailSender(s EmailSender) {
+	h.emailSender = s
 }
 
 // Routes returns a chi.Router with all auth routes mounted.
@@ -57,10 +79,22 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/refresh", h.refresh)
 	r.Get("/google", h.googleLogin)
 	r.Get("/google/callback", h.googleCallback)
+	r.Get("/verify-email", h.verifyEmail)
+	r.Post("/forgot-password", h.forgotPassword)
+	r.Post("/reset-password", h.resetPassword)
 	if h.cliSessionHandler != nil {
 		r.Get("/cli-start", h.cliSessionHandler.Start)
 		r.Get("/cli-poll", h.cliSessionHandler.Poll)
 	}
+	if h.totpHandler != nil {
+		r.Post("/totp/validate", h.totpHandler.Validate)
+	}
+	// Authenticated routes (require Bearer token).
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware(h.jwtMgr))
+		r.Post("/resend-verification", h.resendVerification)
+		r.Get("/me", h.getMe)
+	})
 	return r
 }
 
@@ -82,9 +116,10 @@ type refreshRequest struct {
 }
 
 type authResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
+	AccessToken     string `json:"access_token"`
+	RefreshToken    string `json:"refresh_token"`
+	ExpiresIn       int    `json:"expires_in"`
+	NeedsOnboarding bool   `json:"needs_onboarding,omitempty"`
 }
 
 // --- Handlers ---
@@ -131,6 +166,14 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-create default org + workspace for new user (fire-and-forget on failure).
+	h.autoCreateOrgAndWorkspace(r.Context(), userID, req.Email)
+
+	// Send verification email (non-blocking: log failure but don't fail registration).
+	if err := h.sendVerificationEmail(r.Context(), userID, req.Email); err != nil {
+		log.Printf("auth: send verification email: %v", err)
+	}
+
 	h.issueTokens(w, r, userID, http.StatusCreated)
 }
 
@@ -164,6 +207,23 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	match, err := VerifyPassword(req.Password, passwordHash)
 	if err != nil || !match {
 		apierror.Unauthorized(w, "invalid email or password")
+		return
+	}
+
+	// Check if TOTP 2FA is enabled
+	var totpEnabled bool
+	_ = h.pool.QueryRow(r.Context(), `SELECT totp_enabled FROM users WHERE id = $1`, userID).Scan(&totpEnabled)
+	if totpEnabled {
+		totpToken, tErr := h.jwtMgr.GenerateTOTPToken(userID)
+		if tErr != nil {
+			apierror.InternalError(w, "failed to generate TOTP challenge")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"requires_totp": true,
+			"totp_token":    totpToken,
+		})
 		return
 	}
 
@@ -216,6 +276,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 
 // issueTokens generates an access + refresh token pair, persists the refresh
 // token hash, and writes the JSON response with the given HTTP status code.
+// For new users (201 Created), sets needs_onboarding=true if they have no projects.
 func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID string, statusCode int) {
 	accessToken, err := h.jwtMgr.GenerateAccessToken(userID)
 	if err != nil {
@@ -242,13 +303,99 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID str
 		return
 	}
 
+	// Determine if user needs onboarding (no projects yet).
+	needsOnboarding := h.userNeedsOnboarding(r.Context(), userID)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(authResponse{ //nolint:errcheck
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    900, // 15 minutes in seconds
+		AccessToken:     accessToken,
+		RefreshToken:    refreshToken,
+		ExpiresIn:       900, // 15 minutes in seconds
+		NeedsOnboarding: needsOnboarding,
 	})
+}
+
+// userNeedsOnboarding returns true if the user has no projects (across all their orgs).
+func (h *Handler) userNeedsOnboarding(ctx context.Context, userID string) bool {
+	var count int
+	err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(p.id)
+		FROM projects p
+		JOIN workspaces w ON w.id = p.workspace_id
+		JOIN organizations o ON o.id = w.org_id
+		JOIN org_memberships om ON om.org_id = o.id
+		WHERE om.user_id = $1
+	`, userID).Scan(&count)
+	if err != nil {
+		return false
+	}
+	return count == 0
+}
+
+// autoCreateOrgAndWorkspace creates a default org (derived from email domain) and
+// a default workspace for a newly registered user. Failures are logged but non-fatal.
+func (h *Handler) autoCreateOrgAndWorkspace(ctx context.Context, userID, email string) {
+	parts := strings.SplitN(email, "@", 2)
+	if len(parts) != 2 {
+		return
+	}
+	domain := parts[1]
+
+	// Derive org name: capitalize first letter of domain prefix (e.g., "acme.com" -> "Acme")
+	domainPrefix := strings.SplitN(domain, ".", 2)[0]
+	orgName := capitalizeFirst(domainPrefix) + "'s Org"
+	orgSlug := strings.ReplaceAll(domain, ".", "-")
+
+	var orgID string
+	err := h.pool.QueryRow(ctx,
+		`INSERT INTO organizations (name, slug, owner_id, plan) VALUES ($1, $2, $3, 'free') RETURNING id`,
+		orgName, orgSlug, userID,
+	).Scan(&orgID)
+	if err != nil {
+		// Slug conflict: retry with random suffix
+		orgSlug = orgSlug + "-" + randomHex4()
+		err = h.pool.QueryRow(ctx,
+			`INSERT INTO organizations (name, slug, owner_id, plan) VALUES ($1, $2, $3, 'free') RETURNING id`,
+			orgName, orgSlug, userID,
+		).Scan(&orgID)
+		if err != nil {
+			log.Printf("auth: auto-create org for user %s: %v", userID, err)
+			return
+		}
+	}
+
+	// Add user as org owner
+	_, _ = h.pool.Exec(ctx,
+		`INSERT INTO org_memberships (org_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		orgID, userID,
+	)
+
+	// Create default workspace
+	_, err = h.pool.Exec(ctx,
+		`INSERT INTO workspaces (org_id, name, slug) VALUES ($1, 'Default', 'default')`,
+		orgID,
+	)
+	if err != nil {
+		log.Printf("auth: auto-create workspace for org %s: %v", orgID, err)
+	}
+}
+
+// capitalizeFirst returns s with the first letter uppercased.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+// randomHex4 returns a 4-character random hex string.
+func randomHex4() string {
+	b := make([]byte, 2)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // hashRefreshToken returns the hex-encoded SHA-256 of the raw token string.

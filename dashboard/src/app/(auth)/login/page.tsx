@@ -1,8 +1,154 @@
-import { Shield, Lock } from 'lucide-react'
+'use client'
 
-const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:8080'
+import { useState, useEffect, Suspense } from 'react'
+import { Shield, Lock, Mail } from 'lucide-react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 
-export default function LoginPage() {
+// Helper: call /api/auth/set-tokens to store tokens in httpOnly cookies (XSS protection).
+async function storeTokens(data: { access_token: string; refresh_token: string; expires_in?: number }) {
+  await fetch('/api/auth/set-tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+function LoginForm() {
+  const searchParams = useSearchParams()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [totpRequired, setTotpRequired] = useState(false)
+  const [totpToken, setTotpToken] = useState('')
+  const [totpCode, setTotpCode] = useState('')
+
+  useEffect(() => {
+    if (searchParams.get('reset') === 'success') {
+      setInfo('Password reset successful. You can now sign in with your new password.')
+    }
+  }, [searchParams])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setInfo('')
+    setLoading(true)
+
+    try {
+      const endpoint = mode === 'register' ? '/api/v1/auth/register' : '/api/v1/auth/login'
+      const body: Record<string, string> = { email, password }
+      if (mode === 'register') body.region_code = 'vn'
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error?.message ?? 'Authentication failed')
+        return
+      }
+
+      // Check if TOTP is required
+      if (data.requires_totp) {
+        setTotpRequired(true)
+        setTotpToken(data.totp_token)
+        return
+      }
+
+      // Store tokens via server route to set httpOnly cookies (XSS protection)
+      if (data.access_token) {
+        await storeTokens(data)
+        // New users (no projects yet) go to onboarding wizard; others go to dashboard root.
+        window.location.href = data.needs_onboarding ? '/onboarding' : '/'
+      }
+    } catch {
+      setError('Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleTotpSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+
+    try {
+      const res = await fetch('/api/v1/auth/totp/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ totp_token: totpToken, code: totpCode }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error?.message ?? 'Invalid code')
+        return
+      }
+
+      if (data.access_token) {
+        await storeTokens(data)
+        window.location.href = '/'
+      }
+    } catch {
+      setError('Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // TOTP verification step
+  if (totpRequired) {
+    return (
+      <div className="flex flex-col items-center gap-8">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Shield className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">Valt</h1>
+            <p className="text-xs text-muted-foreground">AI Secret Vault</p>
+          </div>
+        </div>
+
+        <div className="w-full rounded-2xl border bg-card p-8 shadow-lg">
+          <div className="text-center mb-6">
+            <Lock className="w-8 h-8 mx-auto mb-4 text-primary" />
+            <h2 className="text-2xl font-bold">Two-Factor Authentication</h2>
+            <p className="text-muted-foreground mt-2 text-sm">Enter your authenticator code or backup code</p>
+          </div>
+
+          <form onSubmit={handleTotpSubmit} className="space-y-4">
+            <input
+              type="text"
+              value={totpCode}
+              onChange={e => setTotpCode(e.target.value)}
+              placeholder="6-digit code"
+              className="w-full px-4 py-3 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary text-center tracking-widest text-lg"
+              autoFocus
+              maxLength={8}
+            />
+            {error && <p className="text-sm text-destructive text-center">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading || !totpCode}
+              className="w-full rounded-lg bg-primary text-primary-foreground px-4 py-3 text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+            >
+              {loading ? 'Verifying...' : 'Verify'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col items-center gap-8">
       <div className="flex items-center gap-3">
@@ -16,16 +162,15 @@ export default function LoginPage() {
       </div>
 
       <div className="w-full rounded-2xl border bg-card p-8 shadow-lg">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <Lock className="w-8 h-8 mx-auto mb-4 text-primary" />
-          <h2 className="text-2xl font-bold">Welcome back</h2>
-          <p className="text-muted-foreground mt-2 text-sm">
-            Secure secret management for AI agents
-          </p>
+          <h2 className="text-2xl font-bold">{mode === 'login' ? 'Welcome back' : 'Create account'}</h2>
+          <p className="text-muted-foreground mt-2 text-sm">Secure secret management for AI agents</p>
         </div>
 
+        {/* Google OAuth */}
         <a
-          href={`${BACKEND_URL}/api/v1/auth/google`}
+          href="/api/v1/auth/google"
           className="flex items-center justify-center gap-3 w-full rounded-lg border bg-background hover:bg-accent transition-colors px-4 py-3 text-sm font-medium"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -37,11 +182,76 @@ export default function LoginPage() {
           Sign in with Google
         </a>
 
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          By signing in, you agree to our{' '}
-          <span className="underline cursor-pointer">Terms of Service</span>
-          {' '}and{' '}
-          <span className="underline cursor-pointer">Privacy Policy</span>
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">or</span>
+          </div>
+        </div>
+
+        {info && (
+          <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm text-center">
+            {info}
+          </div>
+        )}
+
+        {/* Email/Password form */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <div className="relative">
+              <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Email"
+                required
+                className="w-full pl-10 pr-4 py-3 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          </div>
+          <div>
+            <div className="relative">
+              <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Password"
+                required
+                minLength={8}
+                className="w-full pl-10 pr-4 py-3 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            {mode === 'login' && (
+              <div className="flex justify-end mt-1">
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-sm text-destructive text-center">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-lg bg-primary text-primary-foreground px-4 py-3 text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+          >
+            {loading ? 'Loading...' : mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+
+        <p className="text-center text-sm text-muted-foreground mt-4">
+          {mode === 'login' ? (
+            <>No account?{' '}<button onClick={() => { setMode('register'); setError(''); setInfo('') }} className="text-primary hover:underline">Create one</button></>
+          ) : (
+            <>Have an account?{' '}<button onClick={() => { setMode('login'); setError(''); setInfo('') }} className="text-primary hover:underline">Sign in</button></>
+          )}
         </p>
       </div>
 
@@ -49,5 +259,17 @@ export default function LoginPage() {
         Human-in-the-loop approval for all AI agent secret access
       </p>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[200px]">
+        <div className="text-muted-foreground text-sm">Loading...</div>
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   )
 }

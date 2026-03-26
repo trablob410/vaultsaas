@@ -157,12 +157,14 @@ func bindPolicyToSecret(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (
 
 func newCreateRequestTestHandler(pool *pgxpool.Pool, policyV2Enabled bool) *Handler {
 	vaultSvc := vault.NewService(pool, nil)
+	notifySvc := notify.NewService(nil, nil, "", nil, nil, nil, nil)
 	return NewHandler(
 		NewService(pool, policyV2Enabled),
 		NewCredentialManager(pool),
 		vaultSvc,
 		audit.NewLogger(pool),
-		notify.NewService(nil),
+		notifySvc,
+		nil,
 		nil,
 		pool,
 	)

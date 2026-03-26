@@ -33,15 +33,18 @@ func (t *Tracker) GetOrgPlan(ctx context.Context, orgID string) (string, error) 
 
 // CheckLimit checks if the org is within limits for the given metric.
 // Returns (allowed bool, current int, limit int, err error).
-// For "free" plan: enforce limits. For other plans: always allow.
+// Enforces plan-specific limits. -1 means unlimited.
 func (t *Tracker) CheckLimit(ctx context.Context, orgID, metric string) (bool, int, int, error) {
 	plan, err := t.GetOrgPlan(ctx, orgID)
-	if err != nil || plan != "free" {
+	if err != nil {
 		return true, 0, 0, err
 	}
 
-	limit := limitForMetric(metric)
-	if limit <= 0 {
+	limit := LimitForPlanMetric(plan, metric)
+	if limit < 0 {
+		return true, 0, 0, nil // unlimited
+	}
+	if limit == 0 {
 		return true, 0, 0, nil
 	}
 
@@ -107,15 +110,23 @@ func (t *Tracker) IncrementRequests(ctx context.Context, orgID string) error {
 	return err
 }
 
-func limitForMetric(metric string) int {
-	switch metric {
-	case "secrets_count":
-		return FreeTierMaxSecrets
-	case "agents_count":
-		return FreeTierMaxAgents
-	case "requests_today":
-		return FreeTierMaxReqDay
-	default:
-		return 0
+// LimitForPlanMetric returns the limit for a metric on a given plan. -1 = unlimited.
+func LimitForPlanMetric(plan, metric string) int {
+	limits := LimitsForPlan(plan)
+	if v, ok := limits[metric]; ok {
+		return v
+	}
+	return 0
+}
+
+// LimitsForPlan returns all limits for a given plan.
+func LimitsForPlan(plan string) map[string]int {
+	switch plan {
+	case "pro":
+		return map[string]int{"secrets_count": 500, "agents_count": 25, "requests_today": 10000}
+	case "team":
+		return map[string]int{"secrets_count": -1, "agents_count": -1, "requests_today": 50000}
+	default: // free
+		return map[string]int{"secrets_count": FreeTierMaxSecrets, "agents_count": FreeTierMaxAgents, "requests_today": FreeTierMaxReqDay}
 	}
 }

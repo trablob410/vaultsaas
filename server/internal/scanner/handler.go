@@ -39,12 +39,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) registerRoutes(r chi.Router) {
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceScans, rbac.ActionWrite)).
-		Post("/projects/{project_id}/scans", h.createScan)
+		Post("/projects/{project_id}/scans", h.CreateScan)
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceScans, rbac.ActionRead)).
-		Get("/projects/{project_id}/scans", h.listScans)
-	r.Get("/scans/{scan_id}/findings", h.listFindings)
-	r.Post("/scans/{scan_id}/findings/{finding_id}/import", h.importFinding)
-	r.Post("/scans/{scan_id}/findings/{finding_id}/dismiss", h.dismissFinding)
+		Get("/projects/{project_id}/scans", h.ListScans)
+	r.Get("/scans/{scan_id}/findings", h.ListFindings)
+	r.Post("/scans/{scan_id}/findings/{finding_id}/import", h.ImportFinding)
+	r.Post("/scans/{scan_id}/findings/{finding_id}/dismiss", h.DismissFinding)
 }
 
 type createScanRequest struct {
@@ -53,7 +53,7 @@ type createScanRequest struct {
 	Findings      []ScanFinding `json:"findings"`
 }
 
-func (h *Handler) createScan(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 	userID := auth.UserIDFromContext(r.Context())
 
@@ -79,7 +79,7 @@ func (h *Handler) createScan(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(scan) //nolint:errcheck
 }
 
-func (h *Handler) listScans(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 
 	scans, err := h.service.ListScans(r.Context(), projectID)
@@ -96,7 +96,7 @@ func (h *Handler) listScans(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"scans": scans}) //nolint:errcheck
 }
 
-func (h *Handler) listFindings(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListFindings(w http.ResponseWriter, r *http.Request) {
 	scanID := chi.URLParam(r, "scan_id")
 	userID := auth.UserIDFromContext(r.Context())
 	if !h.checkScanAccess(r.Context(), w, scanID, userID, rbac.ActionRead) {
@@ -121,7 +121,7 @@ type importFindingRequest struct {
 	SecretID string `json:"secret_id"`
 }
 
-func (h *Handler) importFinding(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ImportFinding(w http.ResponseWriter, r *http.Request) {
 	scanID := chi.URLParam(r, "scan_id")
 	findingID := chi.URLParam(r, "finding_id")
 	userID := auth.UserIDFromContext(r.Context())
@@ -149,7 +149,7 @@ func (h *Handler) importFinding(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "imported"}) //nolint:errcheck
 }
 
-func (h *Handler) dismissFinding(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) DismissFinding(w http.ResponseWriter, r *http.Request) {
 	scanID := chi.URLParam(r, "scan_id")
 	findingID := chi.URLParam(r, "finding_id")
 	userID := auth.UserIDFromContext(r.Context())

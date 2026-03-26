@@ -1,7 +1,7 @@
 ---
 title: "Dashboard + MCP Server + Testing"
 description: "Next.js dashboard, Rust MCP server, and comprehensive test suite for Valt MVP"
-status: complete
+status: completed
 priority: P1
 effort: 28h
 branch: master

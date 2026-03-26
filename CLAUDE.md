@@ -63,6 +63,7 @@ Internal packages (one domain per package):
 - `ratelimit` — Redis sliding-window rate limiter (optional; gated on `X-Agent-ID` header)
 - `usage` — plan limit enforcement (org-scoped counts)
 - `audit` — append-only SHA-256 hash chain audit log
+- `gateway` — HTTP forward proxy for credential injection; agents use `HTTPS_PROXY` + placeholder keys
 
 Shared packages under `server/pkg/`:
 - `crypto` — `EncryptAES256GCM` / `DecryptAES256GCM` (`[12-byte nonce || ciphertext+tag]`)
@@ -92,7 +93,7 @@ Next.js 15 App Router with `(auth)` and `(dashboard)` route groups. All authenti
 Rust binary (`valt-mcp-server`). Runs on developer machine alongside the AI agent. Communicates via stdio JSON-RPC 2.0 (default) or HTTP. Connects to the Go API with a stored agent token. Path traversal prevention: rejects absolute paths, Windows drive letters, `..`, paths > 500 chars.
 
 ### Database migrations
-Sequential numbered SQL files in `server/internal/database/migrations/`. Currently at 000024. Migration runner: `valt-migrate` binary (`server/cmd/migrate/`).
+Sequential numbered SQL files in `server/internal/database/migrations/`. Currently at 000037. Migration runner: `valt-migrate` binary (`server/cmd/migrate/`).
 
 ## Code Standards
 - Go: standard project layout, `internal/` for private packages
@@ -112,3 +113,5 @@ Sequential numbered SQL files in `server/internal/database/migrations/`. Current
 | `REDIS_URL` | No | Enables agent rate limiting (60 rpm) |
 | `SMTP_HOST` | No | Email notifications; no-op if unset |
 | `BACKEND_URL` | Dashboard | Default `http://localhost:8080` |
+| `GATEWAY_ENABLED` | No | Enable HTTP proxy gateway (`true`/`false`) |
+| `GATEWAY_PORT` | No | Gateway listen port (default `10256`) |

@@ -31,12 +31,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *Handler) registerRoutes(r chi.Router) {
-	r.Get("/orgs/{org_id}/usage", h.getUsage)
+	r.Get("/orgs/{org_id}/usage", h.GetUsage)
 }
 
 // getUsage returns usage stats for an org.
 // Response: { plan, usage: {...}, limits: {...} }
-func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetUsage(w http.ResponseWriter, r *http.Request) {
 	orgID := chi.URLParam(r, "org_id")
 
 	plan, err := h.tracker.GetOrgPlan(r.Context(), orgID)
@@ -55,11 +55,7 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 			"agents_count":   agents,
 			"requests_today": requests,
 		},
-		"limits": map[string]int{
-			"secrets_count":  FreeTierMaxSecrets,
-			"agents_count":   FreeTierMaxAgents,
-			"requests_today": FreeTierMaxReqDay,
-		},
+		"limits": LimitsForPlan(plan),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

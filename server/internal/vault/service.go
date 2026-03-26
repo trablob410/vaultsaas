@@ -174,14 +174,24 @@ func (s *Service) GetSecret(ctx context.Context, userID, secretID string) (*Secr
 	return &secret, nil
 }
 
+// UpdateSecret updates mutable fields of a secret. Name and description are always
+// updated. encrypted_dek and the blob in object storage are only updated when a new
+// value is provided, preserving the existing DEK when the caller only renames a secret.
 func (s *Service) UpdateSecret(ctx context.Context, userID, secretID string, input UpdateSecretInput) (*Secret, error) {
 	var secret Secret
+
+	// Use COALESCE so that passing NULL for encrypted_dek keeps the existing value,
+	// preventing accidental data loss when only name/description are being changed.
 	err := s.pool.QueryRow(ctx,
-		`UPDATE secrets SET name = $1, description = $2, encrypted_dek = $3,
-		        version = version + 1, updated_at = NOW()
-		 WHERE id = $4 AND user_id = $5 AND deleted_at IS NULL
-		 RETURNING id, user_id, name, description, storage_key, credential_type, source, version, policy, created_at, updated_at`,
-		input.Name, input.Description, input.EncryptedDEK, secretID, userID,
+		`UPDATE secrets
+		    SET name          = $1,
+		        description   = $2,
+		        encrypted_dek = COALESCE($3, encrypted_dek),
+		        version       = version + 1,
+		        updated_at    = NOW()
+		  WHERE id = $4 AND user_id = $5 AND deleted_at IS NULL
+		  RETURNING id, user_id, name, description, storage_key, credential_type, source, version, policy, created_at, updated_at`,
+		input.Name, input.Description, nullableBytes(input.EncryptedDEK), secretID, userID,
 	).Scan(&secret.ID, &secret.UserID, &secret.Name, &secret.Description,
 		&secret.StorageKey, &secret.CredentialType, &secret.Source, &secret.Version,
 		&secret.Policy, &secret.CreatedAt, &secret.UpdatedAt)
@@ -192,7 +202,7 @@ func (s *Service) UpdateSecret(ctx context.Context, userID, secretID string, inp
 		return nil, fmt.Errorf("updating secret: %w", err)
 	}
 
-	// Update blob in MinIO if provided
+	// Update blob in MinIO only when a new encrypted blob is provided.
 	if len(input.EncryptedBlob) > 0 {
 		if err := s.storage.Put(ctx, secret.StorageKey, input.EncryptedBlob); err != nil {
 			return nil, fmt.Errorf("updating blob: %w", err)
@@ -200,6 +210,15 @@ func (s *Service) UpdateSecret(ctx context.Context, userID, secretID string, inp
 	}
 
 	return &secret, nil
+}
+
+// nullableBytes returns nil when b is empty so that pgx sends SQL NULL,
+// allowing COALESCE in the UPDATE query to preserve the existing column value.
+func nullableBytes(b []byte) interface{} {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 // GetSecretByID fetches a secret by ID without owner constraint (for approved credential delivery).

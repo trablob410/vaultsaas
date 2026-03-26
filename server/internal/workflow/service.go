@@ -267,8 +267,8 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 	return &req, nil
 }
 
-// ListPending returns pending access requests for the secret owner.
-func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, limit, offset int) ([]AccessRequest, int, error) {
+// ListPending returns pending access requests visible to the user (as secret owner OR assigned approver).
+func (s *Service) ListPending(ctx context.Context, userID, status string, limit, offset int) ([]AccessRequest, int, error) {
 	filterStatus := "pending"
 	if status != "" {
 		filterStatus = status
@@ -276,24 +276,28 @@ func (s *Service) ListPending(ctx context.Context, ownerUserID, status string, l
 
 	var total int
 	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM access_requests ar
-		 JOIN secrets s ON s.id = ar.secret_id
-		 WHERE s.user_id = $1 AND ar.status = $2 AND s.deleted_at IS NULL`,
-		ownerUserID, filterStatus,
+		`SELECT COUNT(DISTINCT ar.id) FROM access_requests ar
+		 JOIN secrets s ON s.id = ar.secret_id AND s.deleted_at IS NULL
+		 LEFT JOIN approval_steps ast ON ast.request_id = ar.id AND ast.approver_user_id = $1
+		 WHERE (s.user_id = $1 OR ast.approver_user_id IS NOT NULL)
+		   AND ar.status = $2`,
+		userID, filterStatus,
 	).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("counting requests: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT ar.id, ar.secret_id, COALESCE(s.name, '') AS secret_name,
+		`SELECT DISTINCT ar.id, ar.secret_id, COALESCE(s.name, '') AS secret_name,
 		        COALESCE(ar.requester_user_id::text, '') AS requester_user_id, ar.requester_type, ar.ai_agent_id,
 		        ar.status, ar.reason, ar.requested_duration_minutes, ar.decided_by, ar.decided_at, ar.expires_at, ar.created_at
 		 FROM access_requests ar
-		 JOIN secrets s ON s.id = ar.secret_id AND s.user_id = $1 AND s.deleted_at IS NULL
-		 WHERE ar.status = $2
+		 JOIN secrets s ON s.id = ar.secret_id AND s.deleted_at IS NULL
+		 LEFT JOIN approval_steps ast ON ast.request_id = ar.id AND ast.approver_user_id = $1
+		 WHERE (s.user_id = $1 OR ast.approver_user_id IS NOT NULL)
+		   AND ar.status = $2
 		 ORDER BY ar.created_at DESC LIMIT $3 OFFSET $4`,
-		ownerUserID, filterStatus, limit, offset,
+		userID, filterStatus, limit, offset,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying requests: %w", err)

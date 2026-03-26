@@ -1,6 +1,7 @@
 package org
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -11,12 +12,25 @@ import (
 	"github.com/valt-dev/valt/server/pkg/apierror"
 )
 
+// EmailSender sends transactional emails (nil disables email delivery).
+type EmailSender interface {
+	Send(ctx context.Context, to, subject, body string) error
+}
+
 type Handler struct {
-	service *Service
+	service      *Service
+	emailSender  EmailSender
+	dashboardURL string
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// SetEmailSender configures the email sender for invitation emails.
+func (h *Handler) SetEmailSender(s EmailSender, dashboardURL string) {
+	h.emailSender = s
+	h.dashboardURL = dashboardURL
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -26,7 +40,15 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/{org_id}", h.getOrg)
 	r.Post("/{org_id}/members", h.addMember)
 	r.Get("/{org_id}/members", h.listMembers)
+	r.Post("/{org_id}/invitations", h.createInvitation)
+	r.Get("/{org_id}/invitations", h.listInvitations)
+	r.Delete("/{org_id}/invitations/{invitation_id}", h.cancelInvitation)
 	return r
+}
+
+// AcceptInvitation is the public endpoint (mounted under /auth).
+func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	h.acceptInvitation(w, r)
 }
 
 type createOrgRequest struct {

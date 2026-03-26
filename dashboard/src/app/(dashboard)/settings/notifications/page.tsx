@@ -16,15 +16,36 @@ const CHANNEL_LABELS: Record<string, string> = {
   telegram: 'Telegram Chat ID',
 }
 
+interface SlackIntegration {
+  id: string
+  provider: string
+  team_name: string
+  workspace_id: string
+}
+
 export default function NotificationsPage() {
   const [channels, setChannels] = useState<NotificationChannel[]>([])
   const [channelType, setChannelType] = useState('email')
   const [handle, setHandle] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [slackIntegration, setSlackIntegration] = useState<SlackIntegration | null>(null)
+  const [slackConnected, setSlackConnected] = useState(false)
 
   useEffect(() => {
     api.notificationChannels.list().then(res => setChannels(res.channels)).catch(() => {})
+    // Load Slack workspace integration
+    api.orgs.list().then(res => {
+      if (res.orgs.length > 0) {
+        api.integrations.list(res.orgs[0].id).then(intRes => {
+          const slack = intRes.integrations.find(i => i.provider === 'slack')
+          if (slack) setSlackIntegration(slack as SlackIntegration)
+        }).catch(() => {})
+      }
+    }).catch(() => {})
+    // Check for connected query param
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('slack') === 'connected') setSlackConnected(true)
   }, [])
 
   async function handleAdd() {
@@ -143,6 +164,56 @@ export default function NotificationsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Slack Workspace Integration (org-level) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Slack Workspace</CardTitle>
+          <CardDescription>Connect your org&apos;s Slack workspace to receive approval notifications.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {slackConnected && !slackIntegration && (
+            <p className="text-sm text-green-600 mb-2">Slack connected successfully! Refresh to see details.</p>
+          )}
+          {slackIntegration ? (
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Connected</span>
+                  <Badge variant="default" className="text-xs">{slackIntegration.team_name}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">Workspace ID: {slackIntegration.workspace_id}</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive"
+                onClick={async () => {
+                  const orgs = await api.orgs.list()
+                  if (orgs.orgs.length > 0) {
+                    await api.integrations.disconnectSlack(orgs.orgs[0].id)
+                    setSlackIntegration(null)
+                  }
+                }}
+              >
+                Disconnect
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const orgs = await api.orgs.list()
+                if (orgs.orgs.length > 0) {
+                  window.location.href = `/api/proxy/oauth/slack?org_id=${orgs.orgs[0].id}`
+                }
+              }}
+            >
+              Connect Slack Workspace
+            </Button>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { api } from '@/lib/api-client'
 import type { AgentIdentity, AgentToken } from '@/types/api'
-import { Key, Copy, AlertTriangle, Trash2, Bot } from 'lucide-react'
+import { Key, Copy, AlertTriangle, Trash2, Bot, Globe, ShieldBan } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ProxyRoutes } from './proxy-routes'
+import { EndpointLimits } from './endpoint-limits'
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -16,6 +18,7 @@ export default function AgentDetailPage() {
   const [tokenForm, setTokenForm] = useState({ scopes: '', expires_in_seconds: '' })
   const [copied, setCopied] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [tab, setTab] = useState<'tokens' | 'proxy' | 'limits'>('tokens')
 
   useEffect(() => {
     api.agents.get(id).then(setAgent).catch(() => null)
@@ -103,7 +106,22 @@ export default function AgentDetailPage() {
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="flex gap-1 border-b">
+        {([
+          { key: 'tokens' as const, label: 'Tokens', icon: Key },
+          { key: 'proxy' as const, label: 'Proxy Routes', icon: Globe },
+          { key: 'limits' as const, label: 'Rate Limits', icon: ShieldBan },
+        ]).map(t => (
+          <button key={t.key} type="button" onClick={() => setTab(t.key)} className={cn('flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition-colors', tab === t.key ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+            <t.icon className="w-3.5 h-3.5" />{t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'proxy' && <ProxyRoutes agentId={id} />}
+      {tab === 'limits' && <EndpointLimits agentId={id} />}
+
+      {tab === 'tokens' && <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold flex items-center gap-2"><Key className="w-4 h-4" />Tokens</h2>
           {!issuingToken && (
@@ -176,7 +194,7 @@ export default function AgentDetailPage() {
             </table>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

@@ -40,12 +40,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) registerRoutes(r chi.Router) {
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceDynSecret, rbac.ActionWrite)).
-		Post("/projects/{project_id}/providers", h.createProvider)
+		Post("/projects/{project_id}/providers", h.CreateProvider)
 	r.With(rbac.Middleware(h.db, "project_id", rbac.ResourceDynSecret, rbac.ActionRead)).
-		Get("/projects/{project_id}/providers", h.listProviders)
-	r.Post("/providers/{provider_id}/leases", h.createLease)
-	r.Get("/providers/{provider_id}/leases", h.listLeases)
-	r.Delete("/leases/{lease_id}", h.revokeLease)
+		Get("/projects/{project_id}/providers", h.ListProviders)
+	r.Post("/providers/{provider_id}/leases", h.CreateLease)
+	r.Get("/providers/{provider_id}/leases", h.ListLeases)
+	r.Delete("/leases/{lease_id}", h.RevokeLease)
 }
 
 type createProviderRequest struct {
@@ -67,7 +67,7 @@ type leaseResponse struct {
 	TTLSeconds  int               `json:"ttl_seconds"`
 }
 
-func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 	userID := auth.UserIDFromContext(r.Context())
 
@@ -97,7 +97,7 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(pc.ToResponse()) //nolint:errcheck
 }
 
-func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 
 	providers, err := h.service.ListProviders(r.Context(), projectID)
@@ -116,7 +116,7 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"providers": responses}) //nolint:errcheck
 }
 
-func (h *Handler) createLease(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateLease(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "provider_id")
 	userID := auth.UserIDFromContext(r.Context())
 	if !h.checkProviderAccess(r.Context(), w, providerID, userID, rbac.ActionWrite) {
@@ -151,7 +151,7 @@ func (h *Handler) createLease(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
-func (h *Handler) listLeases(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListLeases(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "provider_id")
 	userID := auth.UserIDFromContext(r.Context())
 	if !h.checkProviderAccess(r.Context(), w, providerID, userID, rbac.ActionRead) {
@@ -169,7 +169,7 @@ func (h *Handler) listLeases(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"leases": leases}) //nolint:errcheck
 }
 
-func (h *Handler) revokeLease(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) RevokeLease(w http.ResponseWriter, r *http.Request) {
 	leaseID := chi.URLParam(r, "lease_id")
 	userID := auth.UserIDFromContext(r.Context())
 	providerID, err := h.service.GetLeaseProviderID(r.Context(), leaseID)

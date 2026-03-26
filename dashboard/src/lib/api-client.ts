@@ -19,6 +19,8 @@ import type {
   PolicyTemplate,
   PolicyTemplateVersion,
   SecretPolicyBinding,
+  ProxyRoute,
+  EndpointLimit,
 } from '@/types/api'
 
 const BASE = '/api/proxy'
@@ -26,15 +28,45 @@ export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); this.name = 'ApiError' }
 }
 
+// Attempt a silent token refresh via the server-side refresh endpoint.
+// Returns true if refresh succeeded (new cookies set), false otherwise.
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/auth/refresh', { method: 'POST' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...options?.headers },
   })
+
   if (res.status === 401) {
+    // Try silent refresh once before redirecting to login.
+    const refreshed = await tryRefresh()
+    if (refreshed) {
+      const retryRes = await fetch(`${BASE}${path}`, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+      })
+      if (retryRes.status === 401) {
+        window.location.href = '/login'
+        throw new Error('Unauthorized')
+      }
+      if (!retryRes.ok) {
+        const err = await retryRes.json().catch(() => ({ error: retryRes.statusText }))
+        throw new ApiError((err as { error?: string }).error ?? 'Request failed', retryRes.status)
+      }
+      return retryRes.json() as Promise<T>
+    }
     window.location.href = '/login'
     throw new Error('Unauthorized')
   }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new ApiError((err as { error?: string }).error ?? 'Request failed', res.status)
@@ -175,6 +207,22 @@ export const api = {
     telegramLink: () =>
       apiFetch<{ url: string }>('/me/telegram-link', { method: 'POST' }),
   },
+  integrations: {
+    list: (orgId: string) =>
+      apiFetch<{ integrations: Array<{ id: string; org_id: string; provider: string; workspace_id: string; team_name: string; created_at: string }> }>(`/integrations?org_id=${orgId}`),
+    disconnectSlack: (orgId: string) =>
+      apiFetch<void>(`/integrations/slack?org_id=${orgId}`, { method: 'DELETE' }),
+  },
+  billing: {
+    createCheckout: (body: { plan: string; success_url: string; cancel_url: string }) =>
+      apiFetch<{ url: string }>('/billing/checkout-session', { method: 'POST', body: JSON.stringify(body) }),
+    createPortal: (body: { return_url: string }) =>
+      apiFetch<{ url: string }>('/billing/portal', { method: 'POST', body: JSON.stringify(body) }),
+  },
+  usage: {
+    get: (orgId: string) =>
+      apiFetch<{ plan: string; usage: Record<string, number>; limits: Record<string, number> }>(`/orgs/${orgId}/usage`),
+  },
   scans: {
     list: (projectId: string) =>
       apiFetch<{ scans: ScanResult[] }>(`/projects/${projectId}/scans`),
@@ -187,6 +235,36 @@ export const api = {
       }),
     dismissFinding: (scanId: string, findingId: string) =>
       apiFetch<void>(`/scans/${scanId}/findings/${findingId}/dismiss`, { method: 'POST' }),
+  },
+  proxyRoutes: {
+    list: (agentId: string) =>
+      apiFetch<ProxyRoute[]>(`/proxy-routes?agent_id=${agentId}`),
+    create: (body: {
+      agent_id: string
+      host_pattern: string
+      path_pattern?: string
+      secret_id: string
+      injection_type?: string
+      injection_key?: string
+      injection_format?: string
+    }) => apiFetch<ProxyRoute>('/proxy-routes', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: string, body: Partial<ProxyRoute>) =>
+      apiFetch<{ status: string }>(`/proxy-routes/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id: string) =>
+      apiFetch<void>(`/proxy-routes/${id}`, { method: 'DELETE' }),
+  },
+  endpointLimits: {
+    list: (agentId: string) =>
+      apiFetch<EndpointLimit[]>(`/proxy-endpoint-limits?agent_id=${agentId}`),
+    create: (body: {
+      agent_id: string
+      host_pattern: string
+      path_pattern?: string
+      rpm?: number
+      blocked?: boolean
+    }) => apiFetch<EndpointLimit>('/proxy-endpoint-limits', { method: 'POST', body: JSON.stringify(body) }),
+    delete: (id: string) =>
+      apiFetch<void>(`/proxy-endpoint-limits/${id}`, { method: 'DELETE' }),
   },
   policies: {
     listTemplates: (projectId: string) =>

@@ -6,11 +6,14 @@
 Client Layer:  MCP Server (Rust, stdio) + Dashboard (Next.js)
     ↓ HTTPS
 Backend:       Go Monolith (chi/v5 router)
-               - Auth, Vault, Workflow, Audit, Notify, Org, Agent modules
+               - Auth, Vault, Workflow, Audit, Notify, Org, Agent, Gateway modules
     ↓
 Data Layer:    PostgreSQL 16 (metadata + audit) + MinIO (encrypted blobs)
     ↑
 Proxy:         Caddy (reverse proxy + auto TLS)
+    ↑
+Gateway:       Go HTTP Forward Proxy (:10256, optional)
+               - Transparent credential injection for any agent framework
 ```
 
 ## Components
@@ -216,6 +219,15 @@ Go linting via `.golangci.yml` (govet shadow, errcheck, staticcheck, unused).
 | `internal/agent/handler.go` | REST handlers for agent and token endpoints |
 | `internal/agent/middleware.go` | Agent token auth middleware (validates `agent_tokens` table) |
 
+### Proxy Gateway
+
+| Package | Purpose |
+|---------|---------|
+| `internal/gateway/server.go` | HTTP forward proxy — agent auth, route matching, credential injection, CONNECT tunneling |
+| `internal/gateway/store.go` | DB queries for `proxy_routes` and `proxy_endpoint_limits` tables |
+| `internal/gateway/injector.go` | Credential injection logic, glob path matching, placeholder scanning |
+| `internal/gateway/handler.go` | REST CRUD handlers for proxy routes and endpoint limits |
+
 ### Phase 2 (Approval channels + custom policies)
 
 | Package | Purpose |
@@ -304,6 +316,18 @@ Go linting via `.golangci.yml` (govet shadow, errcheck, staticcheck, unused).
 | GET | `/api/v1/agents/{id}/tokens` | JWT | List agent tokens |
 | POST | `/api/v1/agents/{id}/tokens` | JWT | Issue new agent token |
 | DELETE | `/api/v1/agents/{id}/tokens/{tid}` | JWT | Revoke agent token |
+
+### Proxy Gateway (credential injection)
+
+| Method | Route | Auth | Description |
+|--------|-------|------|-------------|
+| GET | `/api/v1/proxy-routes?agent_id=X` | JWT | List proxy routes for agent |
+| POST | `/api/v1/proxy-routes` | JWT | Create proxy route (auto-generates placeholder) |
+| PUT | `/api/v1/proxy-routes/{id}` | JWT | Update proxy route |
+| DELETE | `/api/v1/proxy-routes/{id}` | JWT | Delete proxy route |
+| GET | `/api/v1/proxy-endpoint-limits?agent_id=X` | JWT | List endpoint rate limits |
+| POST | `/api/v1/proxy-endpoint-limits` | JWT | Create endpoint rate limit |
+| DELETE | `/api/v1/proxy-endpoint-limits/{id}` | JWT | Delete endpoint rate limit |
 
 ### Phase 2 (Approval channels + custom policies + CLI)
 

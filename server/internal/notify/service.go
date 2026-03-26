@@ -19,11 +19,12 @@ type Service struct {
 	slack    *SlackAdapter
 	telegram *TelegramAdapter
 	channels *ChannelStore
+	jobStore *JobStore
 }
 
 // NewService creates a notification Service. Pass nil adapters to disable those channels.
-func NewService(email Notifier, tokens *ActionTokenStore, baseURL string, slack *SlackAdapter, telegram *TelegramAdapter, channels *ChannelStore) *Service {
-	return &Service{email: email, tokens: tokens, baseURL: baseURL, slack: slack, telegram: telegram, channels: channels}
+func NewService(email Notifier, tokens *ActionTokenStore, baseURL string, slack *SlackAdapter, telegram *TelegramAdapter, channels *ChannelStore, jobStore *JobStore) *Service {
+	return &Service{email: email, tokens: tokens, baseURL: baseURL, slack: slack, telegram: telegram, channels: channels, jobStore: jobStore}
 }
 
 // NotifyApprovalNeeded sends an approval email and/or Slack DM with one-click approve/reject.
@@ -41,28 +42,42 @@ func (s *Service) NotifyApprovalNeeded(ctx context.Context, ownerUserID, to, req
 	rejectURL := s.baseURL + "/api/v1/action-tokens/" + rejectToken + "/redeem?action=reject"
 
 	// Email notification
-	if s.email != nil && to != "" {
+	if to != "" {
 		subject := "Valt: Access Request Needs Your Approval"
 		body := buildApprovalEmail(secretName, requester, reason, approveURL, rejectURL)
-		if emailErr := s.email.Send(ctx, to, subject, body); emailErr != nil {
-			fmt.Printf("notify: email send error: %v\n", emailErr)
+		if s.jobStore != nil {
+			_ = s.jobStore.Enqueue(ctx, "email", to, subject, map[string]string{"body": body})
+		} else if s.email != nil {
+			if emailErr := s.email.Send(ctx, to, subject, body); emailErr != nil {
+				fmt.Printf("notify: email send error: %v\n", emailErr)
+			}
 		}
 	}
 
 	// Slack notification
-	if s.slack != nil && s.channels != nil && ownerUserID != "" {
+	if s.channels != nil && ownerUserID != "" {
 		if slackUserID, chErr := s.channels.GetPreferred(ctx, ownerUserID, "slack"); chErr == nil && slackUserID != "" {
-			_ = s.slack.SendApprovalRequest(ctx, slackUserID, requestID, secretName, requester, reason)
+			payload := map[string]string{"request_id": requestID, "secret_name": secretName, "requester": requester, "reason": reason}
+			if s.jobStore != nil {
+				_ = s.jobStore.Enqueue(ctx, "slack", slackUserID, "", payload)
+			} else if s.slack != nil {
+				_ = s.slack.SendApprovalRequest(ctx, slackUserID, requestID, secretName, requester, reason)
+			}
 		}
 	}
 
 	// Telegram notification
-	if s.telegram != nil && s.channels != nil && ownerUserID != "" {
+	if s.channels != nil && ownerUserID != "" {
 		if telegramHandle, chErr := s.channels.GetPreferred(ctx, ownerUserID, "telegram"); chErr == nil && telegramHandle != "" {
 			var chatID int64
 			fmt.Sscan(telegramHandle, &chatID)
 			if chatID != 0 {
-				_ = s.telegram.SendApprovalRequest(ctx, chatID, requestID, secretName, requester, reason)
+				payload := map[string]interface{}{"chat_id": chatID, "request_id": requestID, "secret_name": secretName, "requester": requester, "reason": reason}
+				if s.jobStore != nil {
+					_ = s.jobStore.Enqueue(ctx, "telegram", telegramHandle, "", payload)
+				} else if s.telegram != nil {
+					_ = s.telegram.SendApprovalRequest(ctx, chatID, requestID, secretName, requester, reason)
+				}
 			}
 		}
 	}
@@ -72,12 +87,18 @@ func (s *Service) NotifyApprovalNeeded(ctx context.Context, ownerUserID, to, req
 
 // NotifyAccessGranted sends an access-granted notification.
 func (s *Service) NotifyAccessGranted(ctx context.Context, to, secretName string, durationMin int) error {
-	if s.email == nil {
+	if to == "" {
 		return nil
 	}
 	subject := "Valt: Access Granted"
 	body := "Access to secret '" + secretName + "' has been granted.\nDuration: " + intToStr(durationMin) + " minutes."
-	return s.email.Send(ctx, to, subject, body)
+	if s.jobStore != nil {
+		return s.jobStore.Enqueue(ctx, "email", to, subject, map[string]string{"body": body})
+	}
+	if s.email != nil {
+		return s.email.Send(ctx, to, subject, body)
+	}
+	return nil
 }
 
 func intToStr(n int) string {

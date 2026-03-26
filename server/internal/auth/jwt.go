@@ -63,6 +63,18 @@ func (m *JWTManager) GenerateAccessToken(userID string) (string, error) {
 	return token.SignedString(m.privateKey)
 }
 
+// GenerateCLIToken issues a long-lived JWT for the CLI and MCP server (30-day expiry, typ: "cli").
+func (m *JWTManager) GenerateCLIToken(userID string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub": userID,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"typ": "cli",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(m.privateKey)
+}
+
 func (m *JWTManager) GenerateRefreshToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -71,6 +83,46 @@ func (m *JWTManager) GenerateRefreshToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// GenerateTOTPToken issues a short-lived JWT for TOTP challenge (5min, purpose=totp).
+func (m *JWTManager) GenerateTOTPToken(userID string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":     userID,
+		"iat":     time.Now().Unix(),
+		"exp":     time.Now().Add(5 * time.Minute).Unix(),
+		"typ":     "totp",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(m.privateKey)
+}
+
+// ValidateTOTPToken validates a TOTP challenge token and returns the userID.
+func (m *JWTManager) ValidateTOTPToken(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return m.publicKey, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("invalid totp token: %w", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return "", fmt.Errorf("invalid token claims")
+	}
+	typ, _ := claims["typ"].(string)
+	if typ != "totp" {
+		return "", fmt.Errorf("not a totp token")
+	}
+	userID, ok := claims["sub"].(string)
+	if !ok || userID == "" {
+		return "", fmt.Errorf("missing subject claim")
+	}
+	return userID, nil
+}
+
+// ValidateAccessToken validates a JWT and returns the userID.
+// Accepts both typ="access" (15-min dashboard tokens) and typ="cli" (30-day CLI/MCP tokens).
 func (m *JWTManager) ValidateAccessToken(tokenString string) (string, error) {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
@@ -88,7 +140,7 @@ func (m *JWTManager) ValidateAccessToken(tokenString string) (string, error) {
 	}
 
 	typ, _ := claims["typ"].(string)
-	if typ != "access" {
+	if typ != "access" && typ != "cli" {
 		return "", fmt.Errorf("not an access token")
 	}
 

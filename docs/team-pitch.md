@@ -37,39 +37,44 @@ There's no middle ground: controlled, audited, time-limited access with a human 
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  IDE / AI Agent (Claude, Cursor, etc.)                   │
-│    └── Valt MCP Server (Rust, runs locally on dev box)  │
-└─────────────────────────┬────────────────────────────────┘
-                          │  HTTPS / JSON-RPC 2.0
-┌─────────────────────────▼────────────────────────────────┐
-│  Go API Server                                           │
-│  ├── Vault         (secret storage, envelope encryption) │
-│  ├── Workflow      (approval state machine)              │
-│  ├── Auth          (JWT RS256 + Google OAuth)            │
-│  ├── RBAC          (org → workspace → project → roles)  │
-│  ├── DynSecret     (dynamic DB credentials)              │
-│  └── Audit         (SHA-256 tamper-evident hash chain)   │
-└──────────┬────────────────────────┬──────────────────────┘
-           │                        │
-    ┌──────▼──────┐          ┌──────▼──────┐
-    │  PostgreSQL  │          │    MinIO    │
-    │  metadata +  │          │  encrypted  │
-    │  audit logs  │          │    blobs    │
-    └─────────────┘          └─────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Developer Machine                                           │
+│  ├── IDE / AI Agent (Claude, Cursor, etc.)                   │
+│  │     └── Valt MCP Server (Rust, stdio JSON-RPC 2.0)       │
+│  └── valt CLI (Go) — headless secret access + env injection  │
+└─────────────────────────┬────────────────────────────────────┘
+                          │  HTTPS
+┌─────────────────────────▼────────────────────────────────────┐
+│  Go API Server                                               │
+│  ├── Vault         (secret storage, envelope encryption)     │
+│  ├── Workflow      (approval state machine)                  │
+│  ├── Auth          (JWT RS256 + Google OAuth)                │
+│  ├── RBAC          (org → workspace → project → roles)      │
+│  ├── DynSecret     (dynamic DB credentials)                  │
+│  ├── Notify        (Email / Slack / Telegram approval push)  │
+│  ├── Policy        (3-level custom policy resolver)          │
+│  └── Audit         (SHA-256 tamper-evident hash chain)       │
+└──────────┬──────────────────────────┬────────────────────────┘
+           │                          │
+    ┌──────▼──────┐            ┌──────▼──────┐
+    │  PostgreSQL  │            │    MinIO    │
+    │  metadata +  │            │  encrypted  │
+    │  audit logs  │            │    blobs    │
+    └─────────────┘            └─────────────┘
 
-┌──────────────────────────────────────────────────────────┐
-│  Next.js Dashboard (what humans use)                     │
-│  ├── /secrets      — manage your vault                   │
-│  ├── /approvals    — approve / reject agent requests     │
-│  ├── /agents       — manage agent identities & tokens    │
-│  ├── /providers    — dynamic database credential pools   │
-│  ├── /scans        — detect hardcoded secrets in code    │
-│  └── /audit        — full tamper-evident audit log       │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Next.js Dashboard (what humans use)                         │
+│  ├── /secrets      — manage your vault + per-secret policy   │
+│  ├── /approvals    — approve / reject agent requests         │
+│  ├── /agents       — manage agent identities & tokens        │
+│  ├── /providers    — dynamic database credential pools       │
+│  ├── /scans        — detect hardcoded secrets in code        │
+│  ├── /audit        — full tamper-evident audit log           │
+│  └── /settings     — notification channels (Slack/Telegram)  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-**Tech stack:** Go 1.22 (API) · Next.js 15 / shadcn/ui (dashboard) · Rust (MCP server) · PostgreSQL 16 · MinIO (S3-compatible) · Caddy (TLS proxy)
+**Tech stack:** Go 1.22 (API) · Next.js 15 / shadcn/ui (dashboard) · Rust (MCP server) · Go (valt CLI) · PostgreSQL 16 · MinIO (S3-compatible) · Caddy (TLS proxy)
 
 ---
 
@@ -226,7 +231,65 @@ From the dashboard /scans:
 
 ---
 
-### Case 7: Audit log
+### Case 7: Approval notifications (Slack / Telegram / Email)
+
+When an agent creates an access request, Valt pushes a notification to the approver's configured channels:
+
+```
+Slack (Block Kit message):
+  ┌──────────────────────────────────────────────────┐
+  │ 🔐 Access Request — "Stripe API Key"             │
+  │ Agent: claude-dev   Reason: payment task          │
+  │ Duration: 60 min    Tier: 2 (requires approval)   │
+  │ [✅ Approve]  [❌ Reject]                         │
+  └──────────────────────────────────────────────────┘
+  → Clicking a button calls the Valt API directly.
+  → No dashboard visit required.
+
+Telegram: same message as inline keyboard buttons.
+
+Email: HTML email with one-click action links (72h TTL).
+  → GET /api/v1/action-tokens/{token}/redeem
+  → Approver clicks link → request approved/rejected.
+  → No login required.
+```
+
+Approvers configure channels in `/settings → Notifications`.
+
+---
+
+### Case 8: valt CLI (headless / CI access)
+
+For developers and scripts that don't use an IDE:
+
+```bash
+# One-time setup: OAuth login, org/project selection, agent token
+valt setup
+
+# Install MCP server config for your IDE
+valt mcp install --ide claude   # or cursor, vscode
+
+# List accessible secrets
+valt list
+
+# Get a secret value (auto-requests access + polls if needed)
+valt get STRIPE_API_KEY
+
+# Inject all project secrets as env vars and run a command
+valt run -- npm run deploy
+
+# Create an access request manually
+valt request STRIPE_API_KEY --reason "deploy task" --duration 2h
+
+# Check status
+valt status req_xyz
+```
+
+Works headless — useful in CI pipelines where no browser is available. Agent token stored in OS keychain.
+
+---
+
+### Case 9: Audit log
 
 Every action is recorded in a tamper-evident hash chain:
 
@@ -287,11 +350,12 @@ Agent rate limiting: 60 requests/minute per agent token (Redis-backed sliding wi
 
 ---
 
-## What's Working Now (MVP Status)
+## What's Working Now
 
 | Feature | Status |
 |---------|--------|
 | Secret CRUD + zero-knowledge encryption | ✅ Done |
+| E2E credential delivery (decrypt + deliver to agent) | ✅ Done |
 | Approval workflow (full state machine) | ✅ Done |
 | Multi-step approval chains | ✅ Done |
 | Temporary credentials with TTL + auto-expiry | ✅ Done |
@@ -300,25 +364,33 @@ Agent rate limiting: 60 requests/minute per agent token (Redis-backed sliding wi
 | Google OAuth + JWT auth | ✅ Done |
 | Org → Workspace → Project hierarchy | ✅ Done |
 | Agent identity management + token rotation | ✅ Done |
+| Agent cross-user access requests | ✅ Done |
 | RBAC on all routes | ✅ Done |
 | Agent rate limiting (Redis, 60rpm) | ✅ Done |
 | Secret scanning (local files via MCP) | ✅ Done |
 | Tamper-evident audit log (hash chain) | ✅ Done |
 | Policy tier enforcement | ✅ Done |
-| 104 tests (Go + dashboard + Rust) | ✅ Done |
+| Custom policies (per-secret + per-project) | ✅ Done |
+| Slack bot approvals (Block Kit + HMAC) | ✅ Done |
+| Telegram bot approvals (inline keyboard + deep-link) | ✅ Done |
+| Email one-click approve/reject links | ✅ Done |
+| valt CLI (setup, list, get, run, request, status) | ✅ Done |
+| goreleaser cross-platform builds + CI release | ✅ Done |
+| Tests (Go unit + dashboard + Rust) | ✅ Done |
 
 ---
 
-## What's Next
+## What's Next (Phase 3)
 
 | Feature | Priority |
 |---------|----------|
-| End-to-end credential delivery (decrypt + deliver to agent post-approval) | P0 |
-| Slack / email notifications on approval requests | P1 |
-| Plan limits UI (free vs. paid tier enforcement) | P1 |
-| More dynamic providers (AWS IAM, GitHub tokens) | P2 |
-| ListPending shows requests to assigned approvers (not just secret owners) | P2 |
-| Key rotation mechanism for master key | P2 |
+| Plan limits UI (free vs. paid tier enforcement in dashboard) | P0 |
+| More dynamic providers (AWS IAM, GitHub tokens) | P1 |
+| ListPending shows requests to assigned approvers (not just secret owners) | P1 |
+| Key rotation mechanism for master key | P1 |
+| SSO / OIDC login (enterprise) | P2 |
+| Kubernetes deployment + multi-region | P2 |
+| More MCP tools (scan_secrets, bulk operations) | P2 |
 
 ---
 

@@ -68,3 +68,8 @@ func (c *Client) Get(ctx context.Context, path string, out interface{}) error {
 func (c *Client) Post(ctx context.Context, path string, body, out interface{}) error {
 	return c.do(ctx, "POST", path, body, out)
 }
+
+// Delete performs DELETE /api/v1{path}.
+func (c *Client) Delete(ctx context.Context, path string) error {
+	return c.do(ctx, "DELETE", path, nil, nil)
+}

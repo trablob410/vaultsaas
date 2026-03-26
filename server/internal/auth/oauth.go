@@ -104,18 +104,16 @@ func (h *Handler) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := h.upsertGoogleUser(r, info)
+	userID, isNew, err := h.upsertGoogleUser(r, info)
 	if err != nil {
 		log.Printf("oauth: upsert user: %v", err)
 		http.Error(w, "account setup failed", http.StatusInternalServerError)
 		return
 	}
 
-	accessToken, err := h.jwtMgr.GenerateAccessToken(userID)
-	if err != nil {
-		log.Printf("oauth: generate access token: %v", err)
-		http.Error(w, "token issuance failed", http.StatusInternalServerError)
-		return
+	// Auto-create default org + workspace for brand-new Google OAuth users.
+	if isNew {
+		h.autoCreateOrgAndWorkspace(r.Context(), userID, info.Email)
 	}
 
 	if err := h.issueTokensWithCookies(w, r, userID); err != nil {
@@ -124,20 +122,34 @@ func (h *Handler) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If CLI session cookie present, store JWT so the CLI can poll for it.
+	// If CLI session cookie present, issue a long-lived CLI token (30 days) and
+	// store it so the CLI can poll for it.
 	if cliSessionCookie, cookieErr := r.Cookie("cli_session"); cookieErr == nil && cliSessionCookie.Value != "" {
+		cliToken, cliErr := h.jwtMgr.GenerateCLIToken(userID)
+		if cliErr != nil {
+			log.Printf("oauth: generate cli token: %v", cliErr)
+			http.Error(w, "token issuance failed", http.StatusInternalServerError)
+			return
+		}
 		_, _ = h.pool.Exec(r.Context(),
 			`UPDATE cli_auth_sessions SET token = $1 WHERE id = $2 AND expires_at > NOW()`,
-			accessToken, cliSessionCookie.Value,
+			cliToken, cliSessionCookie.Value,
 		)
 		http.SetCookie(w, &http.Cookie{Name: "cli_session", MaxAge: -1, Path: "/"})
 	}
 
-	redirectTarget, _ := url.JoinPath(h.dashboardURL, "/secrets")
+	// Redirect new users to onboarding; existing users go to secrets.
+	redirectPath := "/secrets"
+	if isNew {
+		redirectPath = "/onboarding"
+	}
+	redirectTarget, _ := url.JoinPath(h.dashboardURL, redirectPath)
 	http.Redirect(w, r, redirectTarget, http.StatusTemporaryRedirect)
 }
 
-func (h *Handler) upsertGoogleUser(r *http.Request, info googleUserInfo) (string, error) {
+// upsertGoogleUser finds or creates a user from Google OAuth info.
+// Returns (userID, isNewUser, error).
+func (h *Handler) upsertGoogleUser(r *http.Request, info googleUserInfo) (string, bool, error) {
 	var userID string
 	// Try to find by google_id first, then by email
 	err := h.pool.QueryRow(r.Context(),
@@ -149,7 +161,7 @@ func (h *Handler) upsertGoogleUser(r *http.Request, info googleUserInfo) (string
 			`UPDATE users SET display_name=$1, avatar_url=$2 WHERE id=$3`,
 			info.Name, info.Picture, userID,
 		)
-		return userID, nil
+		return userID, false, nil
 	}
 
 	// Try match by email (link existing local account)
@@ -161,7 +173,8 @@ func (h *Handler) upsertGoogleUser(r *http.Request, info googleUserInfo) (string
 			`UPDATE users SET google_id=$1, display_name=$2, avatar_url=$3, auth_provider='google' WHERE id=$4`,
 			info.ID, info.Name, info.Picture, userID,
 		)
-		return userID, updateErr
+		// Existing user linked to Google — not treated as brand-new for onboarding.
+		return userID, false, updateErr
 	}
 
 	// Create new user
@@ -172,9 +185,9 @@ func (h *Handler) upsertGoogleUser(r *http.Request, info googleUserInfo) (string
 		info.Email, info.ID, info.Name, info.Picture,
 	).Scan(&userID)
 	if err != nil {
-		return "", fmt.Errorf("insert google user: %w", err)
+		return "", false, fmt.Errorf("insert google user: %w", err)
 	}
-	return userID, nil
+	return userID, true, nil
 }
 
 func (h *Handler) issueTokensWithCookies(w http.ResponseWriter, r *http.Request, userID string) error {

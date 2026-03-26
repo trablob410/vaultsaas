@@ -34,12 +34,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) registerRoutes(r chi.Router) {
 	// workspace-scoped
-	r.Post("/workspaces/{workspace_id}/projects", h.createProject)
-	r.Get("/workspaces/{workspace_id}/projects", h.listProjects)
+	r.Post("/workspaces/{workspace_id}/projects", h.CreateProject)
+	r.Get("/workspaces/{workspace_id}/projects", h.ListProjects)
 	// project-direct
-	r.Get("/projects/{project_id}", h.getProject)
-	r.Post("/projects/{project_id}/members", h.addMember)
-	r.Get("/projects/{project_id}/members", h.listMembers)
+	r.Get("/projects/{project_id}", h.GetProject)
+	r.Post("/projects/{project_id}/members", h.AddMember)
+	r.Get("/projects/{project_id}/members", h.ListMembers)
 }
 
 type createProjectRequest struct {
@@ -47,7 +47,7 @@ type createProjectRequest struct {
 	Slug string `json:"slug"`
 }
 
-func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "workspace_id")
 
 	var req createProjectRequest
@@ -76,7 +76,7 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(p) //nolint:errcheck
 }
 
-func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "workspace_id")
 
 	projects, err := h.service.ListByWorkspace(r.Context(), workspaceID)
@@ -90,7 +90,7 @@ func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(projects) //nolint:errcheck
 }
 
-func (h *Handler) getProject(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 
 	p, err := h.service.Get(r.Context(), projectID)
@@ -113,7 +113,7 @@ type addMemberRequest struct {
 	Role   string `json:"role"`
 }
 
-func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 
 	var req addMemberRequest
@@ -142,7 +142,7 @@ func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(m) //nolint:errcheck
 }
 
-func (h *Handler) listMembers(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 
 	members, err := h.service.ListMembers(r.Context(), projectID)

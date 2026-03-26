@@ -131,11 +131,22 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Use agentID from context (authoritative) over body value
-	requestAgentID := body.AIAgentID
+	// Resolve agent ID for the request.
+	// Context agentID is authoritative (set by dualAuthMiddleware from a validated token).
+	// For ai_agent requester_type without a context agent, validate body field.
+	// For human requester_type, always use empty string so the service stores nil.
+	var requestAgentID string
 	if agentID != "" {
 		requestAgentID = agentID
+	} else if body.RequesterType == "ai_agent" {
+		// Human-authenticated caller claiming ai_agent type: require explicit agent ID.
+		if body.AIAgentID == "" {
+			apierror.BadRequest(w, "ai_agent_id is required when requester_type is 'ai_agent'")
+			return
+		}
+		requestAgentID = body.AIAgentID
 	}
+	// For human requester_type: requestAgentID remains "" → service converts to nil pointer
 
 	callerDesc := userID
 	if agentID != "" {

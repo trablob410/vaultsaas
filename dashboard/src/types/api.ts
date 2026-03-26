@@ -196,3 +196,28 @@ export interface NotificationChannel {
   handle: string
   verified: boolean
 }
+
+export interface ProxyRoute {
+  id: string
+  agent_id: string
+  host_pattern: string
+  path_pattern: string
+  secret_id: string
+  injection_type: string
+  injection_key: string
+  injection_format: string
+  placeholder_key: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface EndpointLimit {
+  id: string
+  agent_id: string
+  host_pattern: string
+  path_pattern: string
+  rpm: number
+  blocked: boolean
+  created_at: string
+}

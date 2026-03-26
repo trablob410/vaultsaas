@@ -58,13 +58,29 @@ type Config struct {
 	// Slack (optional — empty disables Slack notifications)
 	SlackBotToken      string `envconfig:"SLACK_BOT_TOKEN" default:""`
 	SlackSigningSecret string `envconfig:"SLACK_SIGNING_SECRET" default:""`
+	SlackClientID      string `envconfig:"SLACK_CLIENT_ID" default:""`
+	SlackClientSecret  string `envconfig:"SLACK_CLIENT_SECRET" default:""`
 
 	// Telegram (optional — empty disables Telegram notifications)
 	TelegramBotToken    string `envconfig:"TELEGRAM_BOT_TOKEN" default:""`
 	TelegramBotUsername string `envconfig:"TELEGRAM_BOT_USERNAME" default:"valtbot"`
 
+	// Zalo OA (optional — empty disables Zalo notifications)
+	ZaloOAToken string `envconfig:"ZALO_OA_TOKEN" default:""`
+	ZaloOAID    string `envconfig:"ZALO_OA_ID" default:""`
+
+	// Stripe (optional — empty disables billing)
+	StripeSecretKey     string `envconfig:"STRIPE_SECRET_KEY" default:""`
+	StripeWebhookSecret string `envconfig:"STRIPE_WEBHOOK_SECRET" default:""`
+	StripePriceProID    string `envconfig:"STRIPE_PRO_PRICE_ID" default:""`
+	StripePriceTeamID   string `envconfig:"STRIPE_TEAM_PRICE_ID" default:""`
+
 	// Policy enforcement rollout
 	PolicyEnforcementV2Enabled bool `envconfig:"POLICY_ENFORCEMENT_V2_ENABLED" default:"true"`
+
+	// Gateway proxy (optional — disabled by default)
+	GatewayEnabled bool   `envconfig:"GATEWAY_ENABLED" default:"false"`
+	GatewayPort    string `envconfig:"GATEWAY_PORT" default:"10256"`
 }
 
 // MasterKey decodes VaultMasterKey from base64 and returns the raw 32 bytes.

@@ -89,7 +89,7 @@ export default function SecretForm({ open, secret, projectId, onClose, onSuccess
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{secret ? 'Edit Secret' : 'Create Secret'}</DialogTitle>
           <DialogDescription>

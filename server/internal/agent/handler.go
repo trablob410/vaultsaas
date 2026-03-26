@@ -35,12 +35,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *Handler) registerRoutes(r chi.Router) {
-	r.Post("/projects/{project_id}/agents", h.createAgent)
-	r.Get("/projects/{project_id}/agents", h.listAgents)
-	r.Get("/agents/{agent_id}", h.getAgent)
-	r.Post("/agents/{agent_id}/tokens", h.issueToken)
-	r.Delete("/agents/{agent_id}/tokens/{token_id}", h.revokeToken)
-	r.Get("/agents/{agent_id}/tokens", h.listTokens)
+	r.Post("/projects/{project_id}/agents", h.CreateAgent)
+	r.Get("/projects/{project_id}/agents", h.ListAgents)
+	r.Get("/agents/{agent_id}", h.GetAgent)
+	r.Post("/agents/{agent_id}/tokens", h.IssueToken)
+	r.Delete("/agents/{agent_id}/tokens/{token_id}", h.RevokeToken)
+	r.Get("/agents/{agent_id}/tokens", h.ListTokens)
 }
 
 type createAgentRequest struct {
@@ -51,7 +51,7 @@ type createAgentRequest struct {
 	AllowedScopes []string `json:"allowed_scopes"`
 }
 
-func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 	userID := auth.UserIDFromContext(r.Context())
 
@@ -78,7 +78,7 @@ func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(a) //nolint:errcheck
 }
 
-func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "project_id")
 
 	agents, err := h.service.ListByProject(r.Context(), projectID)
@@ -92,7 +92,7 @@ func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(agents) //nolint:errcheck
 }
 
-func (h *Handler) getAgent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "agent_id")
 
 	a, err := h.service.Get(r.Context(), agentID)
@@ -115,7 +115,7 @@ type issueTokenRequest struct {
 	ExpiresInSeconds *int     `json:"expires_in_seconds,omitempty"`
 }
 
-func (h *Handler) issueToken(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) IssueToken(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "agent_id")
 
 	var req issueTokenRequest
@@ -142,7 +142,7 @@ func (h *Handler) issueToken(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(token) //nolint:errcheck
 }
 
-func (h *Handler) revokeToken(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 	tokenID := chi.URLParam(r, "token_id")
 
 	if err := h.service.RevokeToken(r.Context(), tokenID); err != nil {
@@ -154,7 +154,7 @@ func (h *Handler) revokeToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) listTokens(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "agent_id")
 
 	tokens, err := h.service.ListTokens(r.Context(), agentID)

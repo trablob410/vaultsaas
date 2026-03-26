@@ -61,6 +61,15 @@ func (t *TelegramAdapter) AnswerCallbackQuery(ctx context.Context, callbackID, t
 	return t.post(ctx, "answerCallbackQuery", payload)
 }
 
+// SetWebhook registers the Telegram webhook URL. Idempotent — Telegram overwrites existing webhook.
+func (t *TelegramAdapter) SetWebhook(ctx context.Context, webhookURL string) error {
+	payload := map[string]interface{}{
+		"url":             webhookURL,
+		"allowed_updates": []string{"message", "callback_query"},
+	}
+	return t.post(ctx, "setWebhook", payload)
+}
+
 func (t *TelegramAdapter) post(ctx context.Context, method string, payload interface{}) error {
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", t.apiURL(method), bytes.NewReader(body))
