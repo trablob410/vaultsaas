@@ -88,6 +88,13 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if targetHost == "" {
 		targetHost = r.Host
 	}
+
+	// Block SSRF: reject requests to private/internal IPs
+	if isPrivateHost(targetHost) {
+		http.Error(w, "Forbidden: private network access blocked", http.StatusForbidden)
+		return
+	}
+
 	// Strip port for pattern matching
 	host := stripPort(targetHost)
 
@@ -187,6 +194,12 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	agentID, err := s.authenticateAgent(r)
 	if err != nil {
 		http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
+		return
+	}
+
+	// Block SSRF: reject connections to private/internal IPs
+	if isPrivateHost(r.Host) {
+		http.Error(w, "Forbidden: private network access blocked", http.StatusForbidden)
 		return
 	}
 
@@ -292,6 +305,56 @@ func stripPort(host string) string {
 		return host[:i]
 	}
 	return host
+}
+
+// privateIPNets contains RFC 1918, loopback, link-local, and cloud metadata ranges.
+var privateIPNets = func() []*net.IPNet {
+	cidrs := []string{
+		"127.0.0.0/8",    // loopback
+		"10.0.0.0/8",     // RFC 1918
+		"172.16.0.0/12",  // RFC 1918
+		"192.168.0.0/16", // RFC 1918
+		"169.254.0.0/16", // link-local / cloud metadata
+		"::1/128",        // IPv6 loopback
+		"fc00::/7",       // IPv6 unique local
+		"fe80::/10",      // IPv6 link-local
+	}
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		_, n, _ := net.ParseCIDR(cidr)
+		nets = append(nets, n)
+	}
+	return nets
+}()
+
+// isPrivateHost resolves a hostname and returns true if any resolved IP is private.
+// Blocks SSRF attacks targeting internal services, cloud metadata (169.254.169.254), etc.
+func isPrivateHost(host string) bool {
+	h := stripPort(host)
+	// Direct IP check
+	if ip := net.ParseIP(h); ip != nil {
+		for _, n := range privateIPNets {
+			if n.Contains(ip) {
+				return true
+			}
+		}
+		return false
+	}
+	// DNS resolution check
+	addrs, err := net.LookupHost(h)
+	if err != nil {
+		return false // can't resolve — let the dial fail naturally
+	}
+	for _, addr := range addrs {
+		if ip := net.ParseIP(addr); ip != nil {
+			for _, n := range privateIPNets {
+				if n.Contains(ip) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func transfer(dst io.WriteCloser, src io.ReadCloser) {
