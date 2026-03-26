@@ -139,9 +139,23 @@ func (h *Handler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 	if agentID != "" {
 		requestAgentID = agentID
 	} else if body.RequesterType == "ai_agent" {
-		// Human-authenticated caller claiming ai_agent type: require explicit agent ID.
+		// Human-authenticated caller claiming ai_agent type: validate agent exists
+		// and belongs to the same project as the secret to prevent impersonation.
 		if body.AIAgentID == "" {
 			apierror.BadRequest(w, "ai_agent_id is required when requester_type is 'ai_agent'")
+			return
+		}
+		var agentProjectID string
+		agentErr := h.pool.QueryRow(r.Context(),
+			`SELECT project_id FROM agent_identities WHERE id = $1 AND status = 'active'`,
+			body.AIAgentID,
+		).Scan(&agentProjectID)
+		if agentErr != nil {
+			apierror.BadRequest(w, "invalid or inactive ai_agent_id")
+			return
+		}
+		if secret.ProjectID != nil && agentProjectID != *secret.ProjectID {
+			apierror.Forbidden(w, "agent does not belong to the secret's project")
 			return
 		}
 		requestAgentID = body.AIAgentID
