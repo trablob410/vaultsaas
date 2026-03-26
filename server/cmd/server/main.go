@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/valt-dev/valt/server/internal/admin"
 	"github.com/valt-dev/valt/server/internal/agent"
 	"github.com/valt-dev/valt/server/internal/audit"
 	"github.com/valt-dev/valt/server/internal/auth"
@@ -198,6 +199,9 @@ func main() {
 	usageTracker := usage.NewTracker(pool)
 	usageHandler := usage.NewHandler(usageTracker)
 
+	// Admin handler (super-admin dashboard endpoints)
+	adminHandler := admin.NewHandler(pool)
+
 	// Gateway proxy (optional)
 	gatewayStore := gateway.NewStore(pool)
 	gatewayHandler := gateway.NewHandler(gatewayStore)
@@ -353,6 +357,15 @@ func main() {
 			scannerHandler.RegisterRoutes(r)
 			dynHandler.RegisterRoutes(r)
 			usageHandler.RegisterRoutes(r)
+
+			// Admin routes — restricted to users with role = 'admin'
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(admin.AdminMiddleware(pool))
+				r.Get("/stats", adminHandler.GetStats)
+				r.Get("/users", adminHandler.ListUsers)
+				r.Get("/orgs", adminHandler.ListOrgs)
+				r.Get("/payments", adminHandler.ListPayments)
+			})
 		})
 	})
 

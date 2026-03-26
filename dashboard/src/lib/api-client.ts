@@ -253,6 +253,61 @@ export const api = {
     delete: (id: string) =>
       apiFetch<void>(`/proxy-routes/${id}`, { method: 'DELETE' }),
   },
+  admin: {
+    stats: () => apiFetch<{
+      total_users: number
+      total_orgs: number
+      total_secrets: number
+      total_agents: number
+      total_requests_today: number
+      total_requests_all: number
+      users_today: number
+      plan_distribution: Record<string, number>
+    }>('/admin/stats'),
+    users: (params?: { page?: number; limit?: number; search?: string }) => {
+      const q = new URLSearchParams(params as Record<string, string>).toString()
+      return apiFetch<{
+        users: Array<{
+          id: string
+          email: string
+          status: string
+          email_verified: boolean
+          totp_enabled: boolean
+          role: string
+          created_at: string
+        }>
+        page: number
+        limit: number
+      }>(`/admin/users${q ? `?${q}` : ''}`)
+    },
+    orgs: (params?: { page?: number; limit?: number }) => {
+      const q = new URLSearchParams(params as Record<string, string>).toString()
+      return apiFetch<{
+        orgs: Array<{
+          id: string
+          name: string
+          slug: string
+          owner_id: string
+          plan: string
+          member_count: number
+          secrets_count: number
+          created_at: string
+        }>
+        page: number
+        limit: number
+      }>(`/admin/orgs${q ? `?${q}` : ''}`)
+    },
+    payments: () => apiFetch<{
+      payments: Array<{
+        org_id: string
+        org_name: string
+        plan: string
+        stripe_customer_id: string
+        stripe_subscription_id: string
+        plan_seats: number
+      }>
+    }>('/admin/payments'),
+  },
   endpointLimits: {
     list: (agentId: string) =>
       apiFetch<EndpointLimit[]>(`/proxy-endpoint-limits?agent_id=${agentId}`),
