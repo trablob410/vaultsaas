@@ -71,6 +71,26 @@ func (h *Handler) SetEmailSender(s EmailSender) {
 	h.emailSender = s
 }
 
+// CLIStart returns the CLI session start handler (for mounting outside rate limiter).
+func (h *Handler) CLIStart() http.HandlerFunc {
+	if h.cliSessionHandler != nil {
+		return h.cliSessionHandler.Start
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		apierror.NotFound(w, "CLI auth not configured")
+	}
+}
+
+// CLIPoll returns the CLI session poll handler (for mounting outside rate limiter).
+func (h *Handler) CLIPoll() http.HandlerFunc {
+	if h.cliSessionHandler != nil {
+		return h.cliSessionHandler.Poll
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		apierror.NotFound(w, "CLI auth not configured")
+	}
+}
+
 // Routes returns a chi.Router with all auth routes mounted.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
@@ -82,10 +102,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/verify-email", h.verifyEmail)
 	r.Post("/forgot-password", h.forgotPassword)
 	r.Post("/reset-password", h.resetPassword)
-	if h.cliSessionHandler != nil {
-		r.Get("/cli-start", h.cliSessionHandler.Start)
-		r.Get("/cli-poll", h.cliSessionHandler.Poll)
-	}
+	// CLI endpoints mounted separately in main.go (exempt from login rate limiter)
 	if h.totpHandler != nil {
 		r.Post("/totp/validate", h.totpHandler.Validate)
 	}

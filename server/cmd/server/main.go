@@ -240,9 +240,17 @@ func main() {
 		r.Use(custommiddleware.SecurityHeaders)
 
 		r.Route("/auth", func(r chi.Router) {
-			r.Use(loginLimiter.IPMiddleware())
-			r.Mount("/", authHandler.Routes())
-			r.Post("/accept-invite", orgHandler.AcceptInvitation)
+			// CLI polling endpoints — exempt from login rate limiter
+			// CLI polls every 2s for up to 3 minutes (90 requests)
+			r.Get("/cli-start", authHandler.CLIStart())
+			r.Get("/cli-poll", authHandler.CLIPoll())
+
+			// All other auth routes — strict rate limit (5/min per IP)
+			r.Group(func(r chi.Router) {
+				r.Use(loginLimiter.IPMiddleware())
+				r.Mount("/", authHandler.Routes())
+				r.Post("/accept-invite", orgHandler.AcceptInvitation)
+			})
 		})
 
 		// Public: email action-token redemption (no JWT required)
