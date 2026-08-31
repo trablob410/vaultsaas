@@ -53,3 +53,14 @@ plans/*/reports/*.md
 !plans/*/phase-*.md
 
 .claude/
+
+# Build artifacts (binaries are released via GitHub Releases, not committed)
+*.exe
+*.dll
+*.so
+*.dylib
+server/bin/
+valt-cli/bin/
+repomix-output.xml
+dashboard/tsconfig.tsbuildinfo
+dashboard/*.tsbuildinfo
