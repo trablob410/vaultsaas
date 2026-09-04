@@ -56,7 +56,7 @@ giữ migration DB nguyên (không phá dữ liệu người dùng cũ).
 
 | Tuần | Việc | Đầu ra đo được |
 |---|---|---|
-| 1–2 | Fix hash-chain: hash toàn bộ trường (kèm migration re-hash hoặc cắt chuỗi), lastHash đọc từ DB trong transaction + row lock | test tái tạo bug 1, 2 → pass |
+| ~~1–2~~ ✅ | ~~Fix hash-chain~~ (DONE 2026-09-04, xem §E) | test tái tạo bug 1, 2 → pass |
 | 3–4 | Where-context mọi call site + `GET /audit/verify` + export CSV | verify endpoint chạy được trên dữ liệu thật |
 | 5–8 | Provider "derived API key" + nối workflow approval → dynsecret lease | e2e: agent xin → duyệt → nhận lease TTL ngắn |
 | 9–10 | Revoke cascade (`POST /users/{id}/revoke-all`), `RemoveMember` org, sweeper DROP role | 1 lệnh làm chết mọi credential của 1 user |
@@ -66,6 +66,45 @@ giữ migration DB nguyên (không phá dữ liệu người dùng cũ).
 
 - [x] 2026-08-31: dọn binary khỏi repo (server.exe, valt-cli.exe ~36MB,
   repomix-output.xml, tsbuildinfo) + rule .gitignore (commit 2796380).
-- [ ] Lịch sử git vẫn chứa binary cũ — cần `git filter-repo` + force push khi
-  chuyển repo (Quyết định 6), làm một lần cho gọn.
-- [ ] Transfer repo → `ldphuong-vn`/org khi bắt đầu đợt phát triển chính.
+- [x] 2026-09-03: transfer repo → `ldphuong-vn/vaultsaas`; redirect URL cũ hoạt động.
+- [x] 2026-09-04: `git filter-repo` xóa binary khỏi lịch sử + force push
+  (master + feat/custom-policy). Repo pack: ~50MB → 1.47MB.
+- [ ] Known pre-existing (không phải của đợt này): integration test
+  `internal/workflow` fail khi chạy song song trên một DB chung — race
+  `CREATE EXTENSION pgcrypto` giữa các schema, helper không gọi
+  `database.EnsurePartitions`, và một test dựng Handler với notify store nil.
+  Đã xác nhận fail giống hệt trên bản code trước fix hash-chain.
+
+## E. Nhật ký thực hiện — Fix hash-chain (2026-09-04)
+
+Scope: bug 1 + bug 2 trong §A, kèm hai lỗi round-trip chỉ phát hiện được khi
+chạy integration test thật.
+
+1. **Hash bao phủ toàn bộ trường** (`hash-chain.go`): preimage v2 = JSON
+   canonical của mọi cột (user, action, resource, event_type, status, ip, ua,
+   region, metadata, event_time + prev hash). Sửa bất kỳ cột nào trong DB đều
+   gãy chuỗi. `computeHashV1` giữ lại chỉ để verify các row cũ (v1 không bao
+   phủ ip/metadata/time — ghi chú hạn chế trong code).
+2. **Chain head nằm trong DB** (`audit_chain_state`, migration 000042):
+   `Log()` chạy một transaction: `SELECT ... FOR UPDATE` state row → gán
+   `seq = last_seq + 1` → insert → update state. seq liên tục, đúng thứ tự
+   commit, sống qua restart; concurrency an toàn. Bảng `audit_logs` thêm cột
+   `seq`, index thường (unique index không đặt được trên bảng partition không
+   chứa partition key; tính duy nhất do cursor đảm bảo).
+3. **Lỗi round-trip #1 — metadata JSONB**: Postgres render JSONB lại text
+   (thêm dấu cách, sort key theo độ dài) làm hash đọc lại ≠ hash lúc ghi.
+   Migration 000042 đổi cột sang TEXT (giữ nguyên byte); không có query dùng
+   toán tử JSONB trên cột này.
+4. **Lỗi round-trip #2 — INET**: `::TEXT` render `10.0.0.1/32`. Thêm
+   `canonicalIP()`: lấy entry đầu của XFF, parse bằng netip, chuẩn hóa về dạng
+   `addr/NN` trước khi hash; junk → NULL (trước đây junk/líst IP trong XFF
+   làm INSERT lỗi cast inet).
+5. **Dọn code chết**: xóa `internal/database/audit.go` (`WriteAuditLog` ghi
+   row audit NGOÀI chuỗi hash, 0 caller — footgun). `Logger.Log` đổi signature
+   trả về `(Entry, error)` kèm id/seq/hash; thêm `AppendChainNoTx` cho caller
+   giữ tx riêng. `EnsurePartitions` xuất khẩu từ database package.
+6. **Test**: unit (bao phủ trường, phát hiện tamper IP/metadata/time, chuỗi v1
+   cũ vẫn verify, `canonicalIP`) + integration trên Postgres thật
+   (sống qua restart — tái hiện bug 2; 8 goroutine × 5 log → seq 1..40 liền
+   mạch, chuỗi valid; UPDATE thẳng DB → gãy đúng chỗ). Toàn bộ
+   `go test ./internal/... ./pkg/...` pass (12 package).

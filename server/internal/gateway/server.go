@@ -287,7 +287,7 @@ func (s *Server) decryptSecret(ctx context.Context, secretID string) (string, er
 // logProxyRequest writes an audit entry for a proxied request.
 func (s *Server) logProxyRequest(ctx context.Context, agentID, host, path, routeID string) {
 	metadata := fmt.Sprintf(`{"host":"%s","path":"%s","route_id":"%s"}`, host, path, routeID)
-	if err := s.auditLog.Log(ctx, audit.Entry{
+	if _, err := s.auditLog.Log(ctx, audit.Entry{
 		UserID:       agentID,
 		Action:       "proxy_request",
 		ResourceType: "gateway",

@@ -55,7 +55,7 @@ func (h *Handler) queryLogs(w http.ResponseWriter, r *http.Request) {
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
 
-	query := `SELECT id, event_time, user_id, action, resource_type, resource_id,
+	query := `SELECT id, seq, event_time, user_id, action, resource_type, resource_id,
 	                 event_type, status, ip_address::TEXT, user_agent, region_code, metadata, hash_prev
 	          FROM audit_logs WHERE 1=1`
 	countQuery := `SELECT COUNT(*) FROM audit_logs WHERE 1=1`
@@ -98,7 +98,7 @@ func (h *Handler) queryLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query += fmt.Sprintf(" ORDER BY event_time DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	query += fmt.Sprintf(" ORDER BY seq DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 	args = append(args, pg.Limit, pg.Offset)
 
 	rows, err := h.pool.Query(r.Context(), query, args...)
@@ -113,7 +113,7 @@ func (h *Handler) queryLogs(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var e Entry
 		var userID, resourceID, ipAddr, ua, regionCode, hashPrev *string
-		if err := rows.Scan(&e.ID, &e.EventTime, &userID, &e.Action, &e.ResourceType, &resourceID,
+		if err := rows.Scan(&e.ID, &e.Seq, &e.EventTime, &userID, &e.Action, &e.ResourceType, &resourceID,
 			&e.EventType, &e.Status, &ipAddr, &ua, &regionCode, &e.Metadata, &hashPrev); err != nil {
 			log.Printf("Failed to scan audit log: %v", err)
 			apierror.InternalError(w, "failed to read audit logs")

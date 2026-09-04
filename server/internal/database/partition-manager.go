@@ -14,7 +14,7 @@ import (
 // It runs immediately on start, then every 24 hours until ctx is cancelled.
 func StartPartitionManager(ctx context.Context, pool *pgxpool.Pool) {
 	go func() {
-		ensurePartitions(ctx, pool)
+		EnsurePartitions(ctx, pool)
 
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
@@ -25,13 +25,13 @@ func StartPartitionManager(ctx context.Context, pool *pgxpool.Pool) {
 				log.Println("Partition manager stopped")
 				return
 			case <-ticker.C:
-				ensurePartitions(ctx, pool)
+				EnsurePartitions(ctx, pool)
 			}
 		}
 	}()
 }
 
-func ensurePartitions(ctx context.Context, pool *pgxpool.Pool) {
+func EnsurePartitions(ctx context.Context, pool *pgxpool.Pool) {
 	now := time.Now().UTC()
 	for i := 0; i < 3; i++ {
 		t := now.AddDate(0, i, 0)

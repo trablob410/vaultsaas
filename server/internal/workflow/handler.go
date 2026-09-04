@@ -625,7 +625,7 @@ func (h *Handler) ApproveBySystem(ctx context.Context, requestID, actor string) 
 	if issueErr != nil {
 		log.Printf("ApproveBySystem: failed to issue credential: %v", issueErr)
 	}
-	_ = h.auditLog.Log(ctx, audit.Entry{
+	_, _ = h.auditLog.Log(ctx, audit.Entry{
 		UserID:       actor,
 		Action:       "access_request.approve",
 		ResourceType: "access_request",
@@ -640,7 +640,7 @@ func (h *Handler) RejectBySystem(ctx context.Context, requestID, actor, reason s
 	if err != nil {
 		return err
 	}
-	_ = h.auditLog.Log(ctx, audit.Entry{
+	_, _ = h.auditLog.Log(ctx, audit.Entry{
 		UserID:       actor,
 		Action:       "access_request.reject",
 		ResourceType: "access_request",
